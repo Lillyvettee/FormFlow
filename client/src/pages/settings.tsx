@@ -32,7 +32,7 @@ export default function SettingsPage() {
 
   // Branding
   const [companyName, setCompanyName] = useState("");
-  const [themeColor, setThemeColor] = useState("#1a56db");
+  const [primaryColor, setPrimaryColor] = useState("#1a56db");
   const [logoUrl, setLogoUrl] = useState("");
   const [isSavingBranding, setIsSavingBranding] = useState(false);
   const [brandingLoading, setBrandingLoading] = useState(true);
@@ -57,7 +57,7 @@ export default function SettingsPage() {
       const { data } = await supabase.from("organization_settings").select("*").eq("user_id", user.id).single();
       if (data) {
         setCompanyName(data.organization_name ?? "");
-        setThemeColor(data.theme_color ?? "#1a56db");
+        setThemeColor(data.primary_color ?? "#1a56db");
         setLogoUrl(data.logo_url ?? "");
       }
       setBrandingLoading(false);
@@ -82,7 +82,7 @@ export default function SettingsPage() {
     const { error } = await supabase.from("organization_settings").upsert({
       user_id: user.id,
       organization_name: companyName || null,
-      theme_color: themeColor,
+      primary_color: primaryColor,
       logo_url: logoUrl || null,
     });
     setIsSavingBranding(false);
@@ -219,12 +219,12 @@ export default function SettingsPage() {
                   <button
                     key={color.value}
                     className="relative h-9 w-9 rounded-md border-2 transition-all"
-                    style={{ backgroundColor: color.value, borderColor: themeColor === color.value ? color.value : "transparent" }}
+                    style={{ backgroundColor: color.value, borderColor: primaryColor === color.value ? color.value : "transparent" }}
                     onClick={() => setThemeColor(color.value)}
                     title={color.name}
                     data-testid={`button-color-${color.name.toLowerCase()}`}
                   >
-                    {themeColor === color.value && <Check className="h-4 w-4 text-white absolute inset-0 m-auto" />}
+                    {primaryColor === color.value && <Check className="h-4 w-4 text-white absolute inset-0 m-auto" />}
                   </button>
                 ))}
               </div>
