@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,176 +10,144 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
-import { isUnauthorizedError } from "@/lib/auth-utils";
-import { Plus, Package, Trash2, Pencil, ExternalLink, LayoutGrid, List } from "lucide-react";
-import type { InventoryItem } from "@shared/schema";
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/hooks/use-auth";
+import { Plus, Package, Trash2, Pencil, LayoutGrid, List } from "lucide-react";
+import type { InventoryItem } from "@/types/database";
 
-const STATUS_OPTIONS = [
-  { value: "in_stock", label: "In Stock", variant: "default" as const },
-  { value: "low_stock", label: "Low Stock", variant: "secondary" as const },
-  { value: "out_of_stock", label: "Out of Stock", variant: "destructive" as const },
-  { value: "ordered", label: "Ordered", variant: "secondary" as const },
+const CONDITION_OPTIONS = [
+  { value: "new", label: "New", variant: "default" as const },
+  { value: "good", label: "Good", variant: "secondary" as const },
+  { value: "fair", label: "Fair", variant: "secondary" as const },
+  { value: "poor", label: "Poor", variant: "destructive" as const },
 ];
 
 export default function InventoryPage() {
+  const { user } = useAuth();
   const { toast } = useToast();
-  const { data: items, isLoading } = useQuery<InventoryItem[]>({ queryKey: ["/api/inventory"] });
+  const [items, setItems] = useState<InventoryItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [showDialog, setShowDialog] = useState(false);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [viewMode, setViewMode] = useState<"grid" | "table">("grid");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [quantity, setQuantity] = useState(0);
-  const [price, setPrice] = useState(0);
-  const [supplierLink, setSupplierLink] = useState("");
-  const [status, setStatus] = useState("in_stock");
+  const [unit, setUnit] = useState("");
+  const [category, setCategory] = useState("");
+  const [condition, setCondition] = useState("good");
+  const [location, setLocation] = useState("");
+  const [notes, setNotes] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+
+  const loadItems = async () => {
+    if (!user) return;
+    setIsLoading(true);
+    const { data } = await supabase.from("inventory_items").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
+    setItems(data ?? []);
+    setIsLoading(false);
+  };
+
+  useEffect(() => { loadItems(); }, [user]);
 
   const resetForm = () => {
-    setName("");
-    setDescription("");
-    setQuantity(0);
-    setPrice(0);
-    setSupplierLink("");
-    setStatus("in_stock");
-    setEditingItem(null);
-    setShowDialog(false);
+    setName(""); setDescription(""); setQuantity(0); setUnit("");
+    setCategory(""); setCondition("good"); setLocation(""); setNotes("");
+    setEditingItem(null); setShowDialog(false);
   };
 
   const openEdit = (item: InventoryItem) => {
     setEditingItem(item);
-    setName(item.name);
-    setDescription(item.description || "");
-    setQuantity(item.quantity);
-    setPrice(item.price || 0);
-    setSupplierLink(item.supplierLink || "");
-    setStatus(item.status || "in_stock");
+    setName(item.name); setDescription(item.description ?? "");
+    setQuantity(item.quantity); setUnit(item.unit ?? "");
+    setCategory(item.category ?? ""); setCondition(item.condition ?? "good");
+    setLocation(item.location ?? ""); setNotes(item.notes ?? "");
     setShowDialog(true);
   };
 
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      const data = { name, description: description || null, quantity, price, supplierLink: supplierLink || null, status };
-      if (editingItem) {
-        return apiRequest("PATCH", `/api/inventory/${editingItem.id}`, data);
-      }
-      return apiRequest("POST", "/api/inventory", data);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
-      toast({ title: editingItem ? "Item updated" : "Item added" });
-      resetForm();
-    },
-    onError: (error: Error) => {
-      if (isUnauthorizedError(error)) {
-        toast({ title: "Unauthorized", description: "Logging in again...", variant: "destructive" });
-        setTimeout(() => { window.location.href = "/login"; }, 500);
-        return;
-      }
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    },
-  });
+  const handleSave = async () => {
+    if (!user || !name.trim()) return;
+    setIsSaving(true);
+    const payload = { name, description: description || null, quantity, unit: unit || null, category: category || null, condition: condition as any, location: location || null, notes: notes || null, user_id: user.id };
 
-  const deleteMutation = useMutation({
-    mutationFn: async (id: string) => apiRequest("DELETE", `/api/inventory/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
-      toast({ title: "Item deleted" });
-    },
-    onError: (error: Error) => {
-      if (isUnauthorizedError(error)) {
-        toast({ title: "Unauthorized", description: "Logging in again...", variant: "destructive" });
-        setTimeout(() => { window.location.href = "/login"; }, 500);
-        return;
-      }
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    },
-  });
+    if (editingItem) {
+      const { error } = await supabase.from("inventory_items").update(payload).eq("id", editingItem.id);
+      if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); }
+      else { toast({ title: "Item updated" }); resetForm(); loadItems(); }
+    } else {
+      const { error } = await supabase.from("inventory_items").insert(payload);
+      if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); }
+      else { toast({ title: "Item added" }); resetForm(); loadItems(); }
+    }
+    setIsSaving(false);
+  };
 
-  const getStatusBadge = (s: string) => {
-    const opt = STATUS_OPTIONS.find((o) => o.value === s);
-    return <Badge variant={opt?.variant || "secondary"}>{opt?.label || s}</Badge>;
+  const handleDelete = async (id: string) => {
+    const { error } = await supabase.from("inventory_items").delete().eq("id", id);
+    if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); }
+    else { toast({ title: "Item deleted" }); loadItems(); }
+  };
+
+  const getConditionBadge = (c: string) => {
+    const opt = CONDITION_OPTIONS.find((o) => o.value === c);
+    return <Badge variant={opt?.variant ?? "secondary"}>{opt?.label ?? c}</Badge>;
   };
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="space-y-1">
-          <h1 className="text-2xl font-serif font-bold" data-testid="text-inventory-title">Inventory</h1>
+          <h1 className="text-2xl font-serif font-bold">Inventory</h1>
           <p className="text-muted-foreground">Track donated supplies, equipment, and resources</p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex border rounded-md overflow-visible">
-            <Button
-              variant={viewMode === "grid" ? "default" : "ghost"}
-              size="icon"
-              onClick={() => setViewMode("grid")}
-              className="rounded-r-none"
-              data-testid="button-view-grid"
-            >
+          <div className="flex border rounded-md overflow-hidden">
+            <Button variant={viewMode === "grid" ? "default" : "ghost"} size="icon" onClick={() => setViewMode("grid")} className="rounded-r-none">
               <LayoutGrid className="h-4 w-4" />
             </Button>
-            <Button
-              variant={viewMode === "table" ? "default" : "ghost"}
-              size="icon"
-              onClick={() => setViewMode("table")}
-              className="rounded-l-none"
-              data-testid="button-view-table"
-            >
+            <Button variant={viewMode === "table" ? "default" : "ghost"} size="icon" onClick={() => setViewMode("table")} className="rounded-l-none">
               <List className="h-4 w-4" />
             </Button>
           </div>
-          <Button onClick={() => setShowDialog(true)} data-testid="button-add-item">
-            <Plus className="mr-1 h-4 w-4" />
-            Add Item
+          <Button onClick={() => setShowDialog(true)}>
+            <Plus className="mr-1 h-4 w-4" /> Add Item
           </Button>
         </div>
       </div>
 
       {isLoading ? (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[1, 2, 3].map((i) => (
-            <Card key={i} className="p-5"><Skeleton className="h-28 w-full" /></Card>
-          ))}
+          {[1, 2, 3].map((i) => <Card key={i} className="p-5"><Skeleton className="h-28 w-full" /></Card>)}
         </div>
-      ) : items && items.length > 0 ? (
+      ) : items.length > 0 ? (
         viewMode === "grid" ? (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {items.map((item) => (
-              <Card key={item.id} className="p-5 hover-elevate" data-testid={`card-item-${item.id}`}>
+              <Card key={item.id} className="p-5 hover-elevate">
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <div className="min-w-0">
-                    <h3 className="font-semibold truncate" data-testid={`text-item-name-${item.id}`}>{item.name}</h3>
-                    {item.description && (
-                      <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">{item.description}</p>
-                    )}
+                    <h3 className="font-semibold truncate">{item.name}</h3>
+                    {item.description && <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">{item.description}</p>}
                   </div>
-                  {getStatusBadge(item.status || "in_stock")}
+                  {item.condition && getConditionBadge(item.condition)}
                 </div>
                 <div className="grid grid-cols-2 gap-3 text-sm mb-4">
                   <div>
                     <p className="text-muted-foreground text-xs">Quantity</p>
-                    <p className="font-semibold" data-testid={`text-item-qty-${item.id}`}>{item.quantity}</p>
+                    <p className="font-semibold">{item.quantity} {item.unit ?? ""}</p>
                   </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Price</p>
-                    <p className="font-semibold">${(item.price || 0).toFixed(2)}</p>
-                  </div>
+                  {item.category && (
+                    <div>
+                      <p className="text-muted-foreground text-xs">Category</p>
+                      <p className="font-semibold">{item.category}</p>
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-1 pt-3 border-t">
-                  <Button variant="ghost" size="sm" onClick={() => openEdit(item)} data-testid={`button-edit-item-${item.id}`}>
-                    <Pencil className="mr-1 h-3.5 w-3.5" />
-                    Edit
+                  <Button variant="ghost" size="sm" onClick={() => openEdit(item)}>
+                    <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
                   </Button>
-                  {item.supplierLink && (
-                    <a href={item.supplierLink} target="_blank" rel="noopener noreferrer">
-                      <Button variant="ghost" size="sm">
-                        <ExternalLink className="mr-1 h-3.5 w-3.5" />
-                        Supplier
-                      </Button>
-                    </a>
-                  )}
-                  <Button variant="ghost" size="sm" onClick={() => deleteMutation.mutate(item.id)} className="ml-auto" data-testid={`button-delete-item-${item.id}`}>
+                  <Button variant="ghost" size="sm" onClick={() => handleDelete(item.id)} className="ml-auto">
                     <Trash2 className="h-3.5 w-3.5 text-destructive" />
                   </Button>
                 </div>
@@ -193,10 +160,10 @@ export default function InventoryPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead>Condition</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Price</TableHead>
-                  <TableHead>Supplier</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Location</TableHead>
                   <TableHead className="w-20">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -204,26 +171,14 @@ export default function InventoryPage() {
                 {items.map((item) => (
                   <TableRow key={item.id}>
                     <TableCell className="font-medium">{item.name}</TableCell>
-                    <TableCell>{getStatusBadge(item.status || "in_stock")}</TableCell>
-                    <TableCell className="text-right">{item.quantity}</TableCell>
-                    <TableCell className="text-right">${(item.price || 0).toFixed(2)}</TableCell>
-                    <TableCell>
-                      {item.supplierLink ? (
-                        <a href={item.supplierLink} target="_blank" rel="noopener noreferrer" className="text-primary text-xs hover:underline">
-                          View
-                        </a>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">-</span>
-                      )}
-                    </TableCell>
+                    <TableCell>{item.condition ? getConditionBadge(item.condition) : "-"}</TableCell>
+                    <TableCell className="text-right">{item.quantity} {item.unit ?? ""}</TableCell>
+                    <TableCell>{item.category ?? "-"}</TableCell>
+                    <TableCell>{item.location ?? "-"}</TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
-                        <Button variant="ghost" size="icon" onClick={() => openEdit(item)}>
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button variant="ghost" size="icon" onClick={() => deleteMutation.mutate(item.id)}>
-                          <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                        </Button>
+                        <Button variant="ghost" size="icon" onClick={() => openEdit(item)}><Pencil className="h-3.5 w-3.5" /></Button>
+                        <Button variant="ghost" size="icon" onClick={() => handleDelete(item.id)}><Trash2 className="h-3.5 w-3.5 text-destructive" /></Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -239,11 +194,10 @@ export default function InventoryPage() {
           </div>
           <div className="space-y-1.5">
             <h3 className="font-semibold text-lg">No inventory items</h3>
-            <p className="text-sm text-muted-foreground max-w-sm mx-auto">Add items to track quantities, prices, and supplier information.</p>
+            <p className="text-sm text-muted-foreground max-w-sm mx-auto">Add items to track quantities and conditions.</p>
           </div>
-          <Button onClick={() => setShowDialog(true)} data-testid="button-add-first-item">
-            <Plus className="mr-1 h-4 w-4" />
-            Add First Item
+          <Button onClick={() => setShowDialog(true)}>
+            <Plus className="mr-1 h-4 w-4" /> Add First Item
           </Button>
         </div>
       )}
@@ -255,49 +209,53 @@ export default function InventoryPage() {
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <Label htmlFor="item-name">Name</Label>
-              <Input id="item-name" placeholder="Item name" value={name} onChange={(e) => setName(e.target.value)} data-testid="input-item-name" />
+              <Label>Name</Label>
+              <Input placeholder="Item name" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="item-desc">Description</Label>
-              <Textarea id="item-desc" placeholder="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} data-testid="input-item-description" />
+              <Label>Description</Label>
+              <Textarea placeholder="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="item-qty">Quantity</Label>
-                <Input id="item-qty" type="number" min={0} value={quantity} onChange={(e) => setQuantity(parseInt(e.target.value) || 0)} data-testid="input-item-quantity" />
+                <Label>Quantity</Label>
+                <Input type="number" min={0} value={quantity} onChange={(e) => setQuantity(parseInt(e.target.value) || 0)} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="item-price">Price ($)</Label>
-                <Input id="item-price" type="number" min={0} step={0.01} value={price} onChange={(e) => setPrice(parseFloat(e.target.value) || 0)} data-testid="input-item-price" />
+                <Label>Unit</Label>
+                <Input placeholder="boxes, lbs, units..." value={unit} onChange={(e) => setUnit(e.target.value)} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Category</Label>
+                <Input placeholder="Food, Clothing..." value={category} onChange={(e) => setCategory(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Condition</Label>
+                <Select value={condition} onValueChange={setCondition}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {CONDITION_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="item-status">Status</Label>
-              <Select value={status} onValueChange={setStatus}>
-                <SelectTrigger data-testid="select-item-status">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {STATUS_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label>Location</Label>
+              <Input placeholder="Storage room, Shelf A..." value={location} onChange={(e) => setLocation(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="item-supplier">Supplier Link</Label>
-              <Input id="item-supplier" placeholder="https://..." value={supplierLink} onChange={(e) => setSupplierLink(e.target.value)} data-testid="input-item-supplier" />
+              <Label>Notes</Label>
+              <Textarea placeholder="Any additional notes..." value={notes} onChange={(e) => setNotes(e.target.value)} />
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={resetForm}>Cancel</Button>
-            <Button
-              onClick={() => saveMutation.mutate()}
-              disabled={!name.trim() || saveMutation.isPending}
-              data-testid="button-save-item"
-            >
-              {saveMutation.isPending ? "Saving..." : editingItem ? "Update" : "Add Item"}
+            <Button onClick={handleSave} disabled={!name.trim() || isSaving}>
+              {isSaving ? "Saving..." : editingItem ? "Update" : "Add Item"}
             </Button>
           </DialogFooter>
         </DialogContent>

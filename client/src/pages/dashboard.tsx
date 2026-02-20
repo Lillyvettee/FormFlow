@@ -1,25 +1,46 @@
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Link } from "wouter";
 import { FileText, BarChart3, Package, LinkIcon, Plus, ArrowRight, TrendingUp } from "lucide-react";
-import type { Form, FormSubmission, InventoryItem, Link as LinkType } from "@shared/schema";
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/hooks/use-auth";
+import type { Form, InventoryItem, Link as LinkType } from "@/types/database";
 
 export default function DashboardPage() {
-  const { data: forms, isLoading: formsLoading } = useQuery<Form[]>({ queryKey: ["/api/forms"] });
-  const { data: submissions, isLoading: subsLoading } = useQuery<FormSubmission[]>({ queryKey: ["/api/submissions"] });
-  const { data: inventoryItems, isLoading: invLoading } = useQuery<InventoryItem[]>({ queryKey: ["/api/inventory"] });
-  const { data: links, isLoading: linksLoading } = useQuery<LinkType[]>({ queryKey: ["/api/links"] });
+  const { user } = useAuth();
+  const [forms, setForms] = useState<Form[]>([]);
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+  const [links, setLinks] = useState<LinkType[]>([]);
+  const [totalResponses, setTotalResponses] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const isLoading = formsLoading || subsLoading || invLoading || linksLoading;
+  useEffect(() => {
+    if (!user) return;
+    const load = async () => {
+      setIsLoading(true);
+      const [formsRes, inventoryRes, linksRes] = await Promise.all([
+        supabase.from("forms").select("*").eq("user_id", user.id).eq("is_archived", false),
+        supabase.from("inventory_items").select("*").eq("user_id", user.id),
+        supabase.from("links").select("*").eq("user_id", user.id),
+      ]);
+      const formList = formsRes.data ?? [];
+      setForms(formList);
+      setInventoryItems(inventoryRes.data ?? []);
+      setLinks(linksRes.data ?? []);
+      setTotalResponses(formList.reduce((sum, f) => sum + (f.response_count ?? 0), 0));
+      setIsLoading(false);
+    };
+    load();
+  }, [user]);
 
   const stats = [
-    { label: "Active Forms", value: forms?.length ?? 0, icon: FileText, color: "text-primary", bg: "bg-primary/10" },
-    { label: "Responses", value: submissions?.length ?? 0, icon: BarChart3, color: "text-chart-2", bg: "bg-chart-2/10" },
-    { label: "Resources", value: inventoryItems?.length ?? 0, icon: Package, color: "text-chart-3", bg: "bg-chart-3/10" },
-    { label: "Saved Links", value: links?.length ?? 0, icon: LinkIcon, color: "text-chart-4", bg: "bg-chart-4/10" },
+    { label: "Active Forms", value: forms.length, icon: FileText, color: "text-primary", bg: "bg-primary/10" },
+    { label: "Responses", value: totalResponses, icon: BarChart3, color: "text-chart-2", bg: "bg-chart-2/10" },
+    { label: "Resources", value: inventoryItems.length, icon: Package, color: "text-chart-3", bg: "bg-chart-3/10" },
+    { label: "Saved Links", value: links.length, icon: LinkIcon, color: "text-chart-4", bg: "bg-chart-4/10" },
   ];
 
   const quickActions = [
@@ -48,7 +69,7 @@ export default function DashboardPage() {
               <div className="flex items-start justify-between gap-3">
                 <div className="space-y-1.5">
                   <p className="text-sm text-muted-foreground">{stat.label}</p>
-                  <p className="text-3xl font-bold" data-testid={`text-stat-${stat.label.toLowerCase().replace(/\s/g, "-")}`}>{stat.value}</p>
+                  <p className="text-3xl font-bold">{stat.value}</p>
                 </div>
                 <div className={`h-10 w-10 rounded-md ${stat.bg} flex items-center justify-center shrink-0`}>
                   <stat.icon className={`h-5 w-5 ${stat.color}`} />
@@ -68,34 +89,29 @@ export default function DashboardPage() {
             </div>
             <Link href="/forms">
               <Button variant="outline" size="sm" data-testid="button-view-all-forms">
-                View All
-                <ArrowRight className="ml-1 h-3.5 w-3.5" />
+                View All <ArrowRight className="ml-1 h-3.5 w-3.5" />
               </Button>
             </Link>
           </div>
           {isLoading ? (
             <div className="space-y-3">
-              {[1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-16 w-full" />
-              ))}
+              {[1, 2, 3].map((i) => <Skeleton key={i} className="h-16 w-full" />)}
             </div>
-          ) : forms && forms.length > 0 ? (
+          ) : forms.length > 0 ? (
             <div className="space-y-2">
               {forms.slice(0, 5).map((form) => (
-                <div key={form.id} className="flex items-center justify-between gap-4 p-3 rounded-md hover-elevate" data-testid={`card-form-${form.id}`}>
+                <div key={form.id} className="flex items-center justify-between gap-4 p-3 rounded-md hover-elevate">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="h-9 w-9 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
                       <FileText className="h-4 w-4 text-primary" />
                     </div>
                     <div className="min-w-0">
-                      <p className="font-medium text-sm truncate">{form.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {form.fields ? (form.fields as any[]).length : 0} fields
-                      </p>
+                      <p className="font-medium text-sm truncate">{form.title}</p>
+                      <p className="text-xs text-muted-foreground">{(form.fields as any[])?.length ?? 0} fields</p>
                     </div>
                   </div>
-                  <Badge variant={form.isPublished ? "default" : "secondary"} className="shrink-0">
-                    {form.isPublished ? "Published" : "Draft"}
+                  <Badge variant={form.is_published ? "default" : "secondary"}>
+                    {form.is_published ? "Published" : "Draft"}
                   </Badge>
                 </div>
               ))}
@@ -108,8 +124,7 @@ export default function DashboardPage() {
               <p className="text-sm text-muted-foreground">No forms created yet</p>
               <Link href="/forms">
                 <Button size="sm" data-testid="button-create-first-form">
-                  <Plus className="mr-1 h-3.5 w-3.5" />
-                  Create Your First Form
+                  <Plus className="mr-1 h-3.5 w-3.5" /> Create Your First Form
                 </Button>
               </Link>
             </div>
@@ -134,7 +149,6 @@ export default function DashboardPage() {
               </Link>
             ))}
           </div>
-
           <div className="mt-6 p-4 rounded-md bg-primary/5 border border-primary/10">
             <div className="flex items-center gap-2 mb-1.5">
               <TrendingUp className="h-4 w-4 text-primary" />

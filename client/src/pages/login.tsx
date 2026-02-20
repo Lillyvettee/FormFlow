@@ -1,40 +1,40 @@
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient } from "@/lib/queryClient";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { supabase } from "@/lib/supabase";
 import { Heart, ArrowRight, Eye, EyeOff, AlertCircle } from "lucide-react";
 
 export default function LoginPage() {
-  const { toast } = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState("");
 
   const formValid = email.trim() && password;
 
-  const loginMutation = useMutation({
-    mutationFn: async () => {
-      return apiRequest("POST", "/api/auth/login", {
-        email: email.trim(),
-        password,
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-      setServerError("");
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formValid) return;
+    setIsLoading(true);
+    setServerError("");
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+
+    setIsLoading(false);
+
+    if (error) {
+      setServerError(error.message);
+    } else {
       window.location.href = "/";
-    },
-    onError: (error: Error) => {
-      const msg = error.message.replace(/^\d+:\s*/, "");
-      setServerError(msg);
-    },
-  });
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -51,13 +51,7 @@ export default function LoginPage() {
         </div>
 
         <Card className="p-6">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (formValid) loginMutation.mutate();
-            }}
-            className="space-y-4"
-          >
+          <form onSubmit={handleSubmit} className="space-y-4">
             {serverError && (
               <div className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 text-destructive text-sm" data-testid="text-login-error">
                 <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
@@ -104,14 +98,9 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <Button
-              type="submit"
-              className="w-full"
-              disabled={!formValid || loginMutation.isPending}
-              data-testid="button-login"
-            >
-              {loginMutation.isPending ? "Signing in..." : "Sign In"}
-              {!loginMutation.isPending && <ArrowRight className="ml-2 h-4 w-4" />}
+            <Button type="submit" className="w-full" disabled={!formValid || isLoading} data-testid="button-login">
+              {isLoading ? "Signing in..." : "Sign In"}
+              {!isLoading && <ArrowRight className="ml-2 h-4 w-4" />}
             </Button>
           </form>
         </Card>
