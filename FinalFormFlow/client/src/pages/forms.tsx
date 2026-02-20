@@ -1,0 +1,391 @@
+import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { isUnauthorizedError } from "@/lib/auth-utils";
+import { Link } from "wouter";
+import { Plus, FileText, Trash2, Copy, GripVertical, Pencil, Eye, Send } from "lucide-react";
+import type { Form, FormField } from "@shared/schema";
+
+function generateId() {
+  return Math.random().toString(36).substring(2, 9);
+}
+
+const FIELD_TYPES = [
+  { value: "text", label: "Text" },
+  { value: "number", label: "Number" },
+  { value: "dropdown", label: "Dropdown" },
+  { value: "checkbox", label: "Checkbox" },
+  { value: "date", label: "Date/Time" },
+];
+
+function FormBuilder({ form, onClose }: { form?: Form; onClose: () => void }) {
+  const { toast } = useToast();
+  const [name, setName] = useState(form?.name || "");
+  const [description, setDescription] = useState(form?.description || "");
+  const [fields, setFields] = useState<FormField[]>(
+    (form?.fields as FormField[]) || []
+  );
+  const [isPublished, setIsPublished] = useState(form?.isPublished || false);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const url = form ? `/api/forms/${form.id}` : "/api/forms";
+      const method = form ? "PATCH" : "POST";
+      return apiRequest(method, url, { name, description, fields, isPublished });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/forms"] });
+      toast({ title: form ? "Form updated" : "Form created" });
+      onClose();
+    },
+    onError: (error: Error) => {
+      if (isUnauthorizedError(error)) {
+        toast({ title: "Unauthorized", description: "Logging in again...", variant: "destructive" });
+        setTimeout(() => { window.location.href = "/login"; }, 500);
+        return;
+      }
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const addField = () => {
+    setFields([...fields, {
+      id: generateId(),
+      label: "",
+      type: "text",
+      required: false,
+      options: [],
+      placeholder: "",
+    }]);
+  };
+
+  const updateField = (index: number, updates: Partial<FormField>) => {
+    const updated = [...fields];
+    updated[index] = { ...updated[index], ...updates };
+    setFields(updated);
+  };
+
+  const removeField = (index: number) => {
+    setFields(fields.filter((_, i) => i !== index));
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor="form-name">Form Name</Label>
+          <Input
+            id="form-name"
+            placeholder="e.g. Customer Feedback"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            data-testid="input-form-name"
+          />
+        </div>
+        <div className="flex items-center gap-3 sm:justify-end sm:pt-7">
+          <Label htmlFor="published">Published</Label>
+          <Switch
+            id="published"
+            checked={isPublished}
+            onCheckedChange={setIsPublished}
+            data-testid="switch-published"
+          />
+        </div>
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="form-desc">Description</Label>
+        <Textarea
+          id="form-desc"
+          placeholder="What is this form for?"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          data-testid="input-form-description"
+        />
+      </div>
+
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-4">
+          <Label>Form Fields</Label>
+          <Button variant="outline" size="sm" onClick={addField} data-testid="button-add-field">
+            <Plus className="mr-1 h-3.5 w-3.5" />
+            Add Field
+          </Button>
+        </div>
+        {fields.length === 0 ? (
+          <div className="text-center py-10 border border-dashed rounded-md">
+            <p className="text-sm text-muted-foreground mb-3">No fields added yet</p>
+            <Button variant="outline" size="sm" onClick={addField} data-testid="button-add-first-field">
+              <Plus className="mr-1 h-3.5 w-3.5" />
+              Add First Field
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {fields.map((field, index) => (
+              <Card key={field.id} className="p-4">
+                <div className="flex items-start gap-3">
+                  <GripVertical className="h-5 w-5 text-muted-foreground mt-1 shrink-0 cursor-grab" />
+                  <div className="flex-1 grid gap-3 sm:grid-cols-3">
+                    <Input
+                      placeholder="Field label"
+                      value={field.label}
+                      onChange={(e) => updateField(index, { label: e.target.value })}
+                      data-testid={`input-field-label-${index}`}
+                    />
+                    <Select
+                      value={field.type}
+                      onValueChange={(v) => updateField(index, { type: v as FormField["type"] })}
+                    >
+                      <SelectTrigger data-testid={`select-field-type-${index}`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {FIELD_TYPES.map((t) => (
+                          <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-1.5">
+                        <Switch
+                          checked={field.required}
+                          onCheckedChange={(v) => updateField(index, { required: v })}
+                          data-testid={`switch-required-${index}`}
+                        />
+                        <Label className="text-xs">Required</Label>
+                      </div>
+                      <Button variant="ghost" size="icon" onClick={() => removeField(index)} data-testid={`button-remove-field-${index}`}>
+                        <Trash2 className="h-4 w-4 text-muted-foreground" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+                {field.type === "dropdown" && (
+                  <div className="mt-3 ml-8">
+                    <Label className="text-xs text-muted-foreground">Options (comma-separated)</Label>
+                    <Input
+                      placeholder="Option 1, Option 2, Option 3"
+                      value={field.options?.join(", ") || ""}
+                      onChange={(e) => updateField(index, { options: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
+                      className="mt-1"
+                      data-testid={`input-field-options-${index}`}
+                    />
+                  </div>
+                )}
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center justify-end gap-3 pt-2">
+        <Button variant="outline" onClick={onClose} data-testid="button-cancel-form">Cancel</Button>
+        <Button
+          onClick={() => saveMutation.mutate()}
+          disabled={!name.trim() || saveMutation.isPending}
+          data-testid="button-save-form"
+        >
+          {saveMutation.isPending ? "Saving..." : form ? "Update Form" : "Create Form"}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export default function FormsPage() {
+  const { toast } = useToast();
+  const { data: forms, isLoading } = useQuery<Form[]>({ queryKey: ["/api/forms"] });
+  const [editingForm, setEditingForm] = useState<Form | null>(null);
+  const [showBuilder, setShowBuilder] = useState(false);
+  const [previewForm, setPreviewForm] = useState<Form | null>(null);
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => apiRequest("DELETE", `/api/forms/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/forms"] });
+      toast({ title: "Form deleted" });
+    },
+    onError: (error: Error) => {
+      if (isUnauthorizedError(error)) {
+        toast({ title: "Unauthorized", description: "Logging in again...", variant: "destructive" });
+        setTimeout(() => { window.location.href = "/login"; }, 500);
+        return;
+      }
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const duplicateMutation = useMutation({
+    mutationFn: async (form: Form) => {
+      return apiRequest("POST", "/api/forms", {
+        name: `${form.name} (Copy)`,
+        description: form.description,
+        fields: form.fields,
+        isPublished: false,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/forms"] });
+      toast({ title: "Form duplicated" });
+    },
+    onError: (error: Error) => {
+      if (isUnauthorizedError(error)) {
+        toast({ title: "Unauthorized", description: "Logging in again...", variant: "destructive" });
+        setTimeout(() => { window.location.href = "/login"; }, 500);
+        return;
+      }
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  if (showBuilder || editingForm) {
+    return (
+      <div className="p-6 max-w-4xl mx-auto">
+        <h1 className="text-2xl font-serif font-bold mb-6" data-testid="text-form-builder-title">
+          {editingForm ? "Edit Form" : "Create New Form"}
+        </h1>
+        <FormBuilder
+          form={editingForm || undefined}
+          onClose={() => {
+            setShowBuilder(false);
+            setEditingForm(null);
+          }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-serif font-bold" data-testid="text-forms-title">Forms</h1>
+          <p className="text-muted-foreground">Create volunteer sign-ups, donation forms, surveys, and more</p>
+        </div>
+        <Button onClick={() => setShowBuilder(true)} data-testid="button-create-form">
+          <Plus className="mr-1 h-4 w-4" />
+          New Form
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {[1, 2, 3].map((i) => (
+            <Card key={i} className="p-5"><Skeleton className="h-24 w-full" /></Card>
+          ))}
+        </div>
+      ) : forms && forms.length > 0 ? (
+        <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {forms.map((form) => (
+            <Card key={form.id} className="p-5 space-y-4 hover-elevate" data-testid={`card-form-${form.id}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="font-semibold truncate" data-testid={`text-form-name-${form.id}`}>{form.name}</h3>
+                  <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">{form.description || "No description"}</p>
+                </div>
+                <Badge variant={form.isPublished ? "default" : "secondary"} className="shrink-0">
+                  {form.isPublished ? "Published" : "Draft"}
+                </Badge>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {(form.fields as any[])?.length || 0} fields
+              </div>
+              <div className="flex items-center gap-1.5 pt-1 border-t">
+                <Button variant="ghost" size="sm" onClick={() => setEditingForm(form)} data-testid={`button-edit-form-${form.id}`}>
+                  <Pencil className="mr-1 h-3.5 w-3.5" />
+                  Edit
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setPreviewForm(form)} data-testid={`button-preview-form-${form.id}`}>
+                  <Eye className="mr-1 h-3.5 w-3.5" />
+                  Preview
+                </Button>
+                <Link href={`/forms/${form.id}/submit`}>
+                  <Button variant="ghost" size="sm" data-testid={`button-fill-form-${form.id}`}>
+                    <Send className="mr-1 h-3.5 w-3.5" />
+                    Fill
+                  </Button>
+                </Link>
+                <Button variant="ghost" size="sm" onClick={() => duplicateMutation.mutate(form)} data-testid={`button-duplicate-form-${form.id}`}>
+                  <Copy className="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => deleteMutation.mutate(form.id)} data-testid={`button-delete-form-${form.id}`}>
+                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                </Button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <div className="text-center py-20 space-y-4">
+          <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center mx-auto">
+            <FileText className="h-7 w-7 text-muted-foreground" />
+          </div>
+          <div className="space-y-1.5">
+            <h3 className="font-semibold text-lg">No forms yet</h3>
+            <p className="text-sm text-muted-foreground max-w-sm mx-auto">Create your first form to collect volunteer information, event registrations, or community feedback.</p>
+          </div>
+          <Button onClick={() => setShowBuilder(true)} data-testid="button-create-first-form">
+            <Plus className="mr-1 h-4 w-4" />
+            Create First Form
+          </Button>
+        </div>
+      )}
+
+      <Dialog open={!!previewForm} onOpenChange={() => setPreviewForm(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{previewForm?.name}</DialogTitle>
+          </DialogHeader>
+          {previewForm && (
+            <div className="space-y-4 py-2">
+              {previewForm.description && (
+                <p className="text-sm text-muted-foreground">{previewForm.description}</p>
+              )}
+              {((previewForm.fields as FormField[]) || []).map((field) => (
+                <div key={field.id} className="space-y-1.5">
+                  <Label>
+                    {field.label}
+                    {field.required && <span className="text-destructive ml-0.5">*</span>}
+                  </Label>
+                  {field.type === "text" && <Input placeholder={field.placeholder || field.label} disabled />}
+                  {field.type === "number" && <Input type="number" placeholder="0" disabled />}
+                  {field.type === "date" && <Input type="date" disabled />}
+                  {field.type === "checkbox" && (
+                    <div className="flex items-center gap-2">
+                      <input type="checkbox" disabled className="h-4 w-4" />
+                      <span className="text-sm text-muted-foreground">{field.label}</span>
+                    </div>
+                  )}
+                  {field.type === "dropdown" && (
+                    <Select disabled>
+                      <SelectTrigger><SelectValue placeholder="Select..." /></SelectTrigger>
+                      <SelectContent>
+                        {field.options?.map((opt) => (
+                          <SelectItem key={opt} value={opt}>{opt}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPreviewForm(null)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
