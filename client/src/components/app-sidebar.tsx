@@ -1,5 +1,5 @@
 import { useLocation, Link } from "wouter";
-import { LayoutDashboard, FileText, BarChart3, LinkIcon, Package, Settings, LogOut, Heart, Image, MessageSquare } from "lucide-react";
+import { LayoutDashboard, FileText, BarChart3, LinkIcon, Package, Settings, LogOut, Heart, Image, MessageSquare, DollarSign, Clock } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
@@ -23,6 +23,14 @@ const navItems = [
   { title: "Links", url: "/links", icon: LinkIcon },
   { title: "Inventory", url: "/inventory", icon: Package },
   { title: "Media", url: "/media", icon: Image },
+];
+
+const phase2Items = [
+  { title: "Donations", url: "/donations", icon: DollarSign },
+  { title: "Volunteer Hours", url: "/volunteer-hours", icon: Clock },
+];
+
+const bottomItems = [
   { title: "Settings", url: "/settings", icon: Settings },
   { title: "Feedback", url: "/feedback", icon: MessageSquare },
 ];
@@ -47,6 +55,8 @@ export function AppSidebar() {
     window.location.href = "/";
   };
 
+  const isActive = (url: string) => url === "/" ? location === "/" : location.startsWith(url);
+
   return (
     <Sidebar>
       <SidebarHeader className="p-4">
@@ -60,22 +70,54 @@ export function AppSidebar() {
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+          <SidebarGroupLabel>Main</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => {
-                const isActive = item.url === "/" ? location === "/" : location.startsWith(item.url);
-                return (
-                  <SidebarMenuItem key={item.title}>
-                    <SidebarMenuButton asChild isActive={isActive}>
-                      <Link href={item.url} data-testid={`link-nav-${item.title.toLowerCase()}`}>
-                        <item.icon className="h-4 w-4" />
-                        <span>{item.title}</span>
-                      </Link>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
+              {navItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton asChild isActive={isActive(item.url)}>
+                    <Link href={item.url} data-testid={`link-nav-${item.title.toLowerCase()}`}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Impact Tracking</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {phase2Items.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton asChild isActive={isActive(item.url)}>
+                    <Link href={item.url} data-testid={`link-nav-${item.title.toLowerCase().replace(" ", "-")}`}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {bottomItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton asChild isActive={isActive(item.url)}>
+                    <Link href={item.url}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -89,12 +131,8 @@ export function AppSidebar() {
             </AvatarFallback>
           </Avatar>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium truncate" data-testid="text-user-name">
-              {fullName || email}
-            </p>
-            <p className="text-xs text-muted-foreground truncate" data-testid="text-user-email">
-              {email}
-            </p>
+            <p className="text-sm font-medium truncate" data-testid="text-user-name">{fullName || email}</p>
+            <p className="text-xs text-muted-foreground truncate" data-testid="text-user-email">{email}</p>
           </div>
           <button
             onClick={handleLogout}

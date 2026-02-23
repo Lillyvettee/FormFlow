@@ -1,4 +1,4 @@
-import { Switch, Route, useLocation } from "wouter";
+import { Switch, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -23,6 +23,8 @@ import LoginPage from "@/pages/login";
 import ForgotPasswordPage from "@/pages/forgot-password";
 import FeedbackPage from "@/pages/feedback";
 import MediaPage from "@/pages/media";
+import DonationsPage from "@/pages/donations";
+import VolunteerHoursPage from "@/pages/volunteer-hours";
 
 function AuthenticatedRouter() {
   return (
@@ -33,6 +35,8 @@ function AuthenticatedRouter() {
       <Route path="/links" component={LinksPage} />
       <Route path="/inventory" component={InventoryPage} />
       <Route path="/media" component={MediaPage} />
+      <Route path="/donations" component={DonationsPage} />
+      <Route path="/volunteer-hours" component={VolunteerHoursPage} />
       <Route path="/settings" component={SettingsPage} />
       <Route path="/feedback" component={FeedbackPage} />
       <Route path="/forms/:id/submit" component={SubmitFormPage} />
@@ -42,13 +46,8 @@ function AuthenticatedRouter() {
 }
 
 function AuthenticatedLayout() {
-  const sidebarStyle = {
-    "--sidebar-width": "16rem",
-    "--sidebar-width-icon": "3rem",
-  };
-
   return (
-    <SidebarProvider style={sidebarStyle as React.CSSProperties}>
+    <SidebarProvider>
       <div className="flex h-screen w-full">
         <AppSidebar />
         <div className="flex flex-col flex-1 min-w-0">
@@ -91,8 +90,7 @@ function AppContent() {
     );
   }
 
-  if (!user) return <UnauthenticatedRouter />;
-  return <AuthenticatedLayout />;
+  return user ? <AuthenticatedLayout /> : <UnauthenticatedRouter />;
 }
 
 function App() {
