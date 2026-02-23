@@ -13,7 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
 import { Link } from "wouter";
-import { Plus, FileText, Trash2, Copy, GripVertical, Pencil, Eye, Send } from "lucide-react";
+import { Plus, FileText, Trash2, Copy, GripVertical, Pencil, Eye, Send, Link2 } from "lucide-react";
 import type { Form, FormField } from "@/types/database";
 
 function generateId() {
@@ -175,6 +175,12 @@ export default function FormsPage() {
 
   useEffect(() => { loadForms(); }, [user]);
 
+  const handleShare = (form: Form) => {
+    const url = `${window.location.origin}/forms/${form.id}/submit`;
+    navigator.clipboard.writeText(url);
+    toast({ title: "Link copied!", description: form.is_published ? "Share this link with anyone." : "Note: publish the form first so people can access it." });
+  };
+
   const handleDelete = async (id: string) => {
     const { error } = await supabase.from("forms").delete().eq("id", id);
     if (error) { toast({ title: "Error", description: error.message, variant: "destructive" }); }
@@ -248,6 +254,9 @@ export default function FormsPage() {
                     <Send className="mr-1 h-3.5 w-3.5" /> Fill
                   </Button>
                 </Link>
+                <Button variant="ghost" size="sm" onClick={() => handleShare(form)} data-testid={`button-share-form-${form.id}`} title="Copy share link">
+                  <Link2 className="h-3.5 w-3.5" />
+                </Button>
                 <Button variant="ghost" size="sm" onClick={() => handleDuplicate(form)} data-testid={`button-duplicate-form-${form.id}`}>
                   <Copy className="h-3.5 w-3.5" />
                 </Button>
