@@ -5,7 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/theme-provider";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { useAuth } from "@/hooks/use-auth";  
+import { useAuth } from "@/hooks/use-auth";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -20,6 +20,9 @@ import SettingsPage from "@/pages/settings";
 import SubmitFormPage from "@/pages/submit-form";
 import SignupPage from "@/pages/signup";
 import LoginPage from "@/pages/login";
+import ForgotPasswordPage from "@/pages/forgot-password";
+import FeedbackPage from "@/pages/feedback";
+import MediaPage from "@/pages/media";
 
 function AuthenticatedRouter() {
   return (
@@ -29,7 +32,9 @@ function AuthenticatedRouter() {
       <Route path="/reports" component={ReportsPage} />
       <Route path="/links" component={LinksPage} />
       <Route path="/inventory" component={InventoryPage} />
+      <Route path="/media" component={MediaPage} />
       <Route path="/settings" component={SettingsPage} />
+      <Route path="/feedback" component={FeedbackPage} />
       <Route path="/forms/:id/submit" component={SubmitFormPage} />
       <Route component={NotFound} />
     </Switch>
@@ -65,6 +70,8 @@ function UnauthenticatedRouter() {
     <Switch>
       <Route path="/signup" component={SignupPage} />
       <Route path="/login" component={LoginPage} />
+      <Route path="/forgot-password" component={ForgotPasswordPage} />
+      <Route path="/forms/:id/submit" component={SubmitFormPage} />
       <Route component={LandingPage} />
     </Switch>
   );
@@ -84,10 +91,7 @@ function AppContent() {
     );
   }
 
-  if (!user) {
-    return <UnauthenticatedRouter />;
-  }
-
+  if (!user) return <UnauthenticatedRouter />;
   return <AuthenticatedLayout />;
 }
 

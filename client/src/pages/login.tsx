@@ -21,26 +21,15 @@ export default function LoginPage() {
     if (!formValid) return;
     setIsLoading(true);
     setServerError("");
-
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
-
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
     setIsLoading(false);
-
-    if (error) {
-      setServerError(error.message);
-    } else {
-      window.location.href = "/";
-    }
+    if (error) { setServerError(error.message); }
+    else { window.location.href = "/"; }
   };
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <div className="absolute top-4 right-4">
-        <ThemeToggle />
-      </div>
+      <div className="absolute top-4 right-4"><ThemeToggle /></div>
       <div className="w-full max-w-md space-y-6">
         <div className="text-center space-y-2">
           <div className="h-10 w-10 rounded-md bg-primary flex items-center justify-center mx-auto">
@@ -58,46 +47,24 @@ export default function LoginPage() {
                 <span>{serverError}</span>
               </div>
             )}
-
             <div className="space-y-2">
               <Label htmlFor="email">Email Address</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder="you@organization.org"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoComplete="email"
-                data-testid="input-email"
-              />
+              <Input id="email" type="email" placeholder="you@organization.org" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" data-testid="input-email" />
             </div>
-
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="password">Password</Label>
+                <a href="/forgot-password" className="text-xs text-muted-foreground hover:text-foreground hover:underline">
+                  Forgot password?
+                </a>
+              </div>
               <div className="relative">
-                <Input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  placeholder="Enter your password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete="current-password"
-                  data-testid="input-password"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="absolute right-0 top-0"
-                  onClick={() => setShowPassword(!showPassword)}
-                  tabIndex={-1}
-                  data-testid="button-toggle-password"
-                >
+                <Input id="password" type={showPassword ? "text" : "password"} placeholder="Enter your password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" data-testid="input-password" />
+                <Button type="button" variant="ghost" size="icon" className="absolute right-0 top-0" onClick={() => setShowPassword(!showPassword)} tabIndex={-1}>
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </Button>
               </div>
             </div>
-
             <Button type="submit" className="w-full" disabled={!formValid || isLoading} data-testid="button-login">
               {isLoading ? "Signing in..." : "Sign In"}
               {!isLoading && <ArrowRight className="ml-2 h-4 w-4" />}
@@ -107,9 +74,7 @@ export default function LoginPage() {
 
         <p className="text-center text-sm text-muted-foreground">
           Don't have an account?{" "}
-          <a href="/signup" className="text-foreground font-medium hover:underline" data-testid="link-signup">
-            Sign up
-          </a>
+          <a href="/signup" className="text-foreground font-medium hover:underline" data-testid="link-signup">Sign up</a>
         </p>
       </div>
     </div>
