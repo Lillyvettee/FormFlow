@@ -13,7 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
 import { Link } from "wouter";
-import { Plus, FileText, Trash2, Copy, GripVertical, Pencil, Eye, Send, Link2 } from "lucide-react";
+import { Plus, FileText, Trash2, Copy, GripVertical, Pencil, Eye, Send, Link2, Image, Mic, ArrowRight } from "lucide-react";
 import type { Form, FormField } from "@/types/database";
 
 function generateId() {
@@ -21,21 +21,30 @@ function generateId() {
 }
 
 const FIELD_TYPES = [
-  { value: "text", label: "Text" },
-  { value: "number", label: "Number" },
-  { value: "select", label: "Dropdown" },
-  { value: "checkbox", label: "Checkbox" },
-  { value: "date", label: "Date" },
-  { value: "email", label: "Email" },
-  { value: "textarea", label: "Long Text" },
+  { value: "text", label: "📝 Text" },
+  { value: "textarea", label: "📄 Long Text" },
+  { value: "number", label: "🔢 Number" },
+  { value: "email", label: "📧 Email" },
+  { value: "date", label: "📅 Date" },
+  { value: "select", label: "🔽 Dropdown" },
+  { value: "checkbox", label: "☑️ Checkbox" },
+  { value: "image", label: "🖼️ Photo Upload" },
+  { value: "audio", label: "🎤 Voice Memo" },
 ];
 
-function FormBuilder({ form, userId, onClose, onSaved }: { form?: Form; userId: string; onClose: () => void; onSaved: () => void }) {
+function FormBuilder({ form, userId, allForms, onClose, onSaved }: {
+  form?: Form;
+  userId: string;
+  allForms: Form[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const { toast } = useToast();
   const [title, setTitle] = useState(form?.title ?? "");
   const [description, setDescription] = useState(form?.description ?? "");
   const [fields, setFields] = useState<FormField[]>((form?.fields as FormField[]) ?? []);
   const [isPublished, setIsPublished] = useState(form?.is_published ?? false);
+  const [followUpFormId, setFollowUpFormId] = useState<string>((form?.settings as any)?.followUpFormId ?? "");
   const [isSaving, setIsSaving] = useState(false);
 
   const addField = () => {
@@ -53,7 +62,8 @@ function FormBuilder({ form, userId, onClose, onSaved }: { form?: Form; userId: 
   const handleSave = async () => {
     if (!title.trim()) return;
     setIsSaving(true);
-    const payload = { title, description: description || null, fields, is_published: isPublished, user_id: userId };
+    const settings = { ...(form?.settings ?? {}), followUpFormId: followUpFormId || null };
+    const payload = { title, description: description || null, fields, is_published: isPublished, settings, user_id: userId };
 
     if (form) {
       const { error } = await supabase.from("forms").update(payload).eq("id", form.id);
@@ -67,6 +77,9 @@ function FormBuilder({ form, userId, onClose, onSaved }: { form?: Form; userId: 
     setIsSaving(false);
   };
 
+  // Other forms this one can link to (not itself)
+  const linkableForms = allForms.filter((f) => f.id !== form?.id && f.is_published);
+
   return (
     <div className="space-y-6">
       <div className="grid gap-4 sm:grid-cols-2">
@@ -79,9 +92,33 @@ function FormBuilder({ form, userId, onClose, onSaved }: { form?: Form; userId: 
           <Switch checked={isPublished} onCheckedChange={setIsPublished} data-testid="switch-published" />
         </div>
       </div>
+
       <div className="space-y-2">
         <Label>Description</Label>
         <Textarea placeholder="What is this form for?" value={description} onChange={(e) => setDescription(e.target.value)} data-testid="input-form-description" />
+      </div>
+
+      {/* Follow-up form connection */}
+      <div className="space-y-2 p-4 border rounded-md bg-muted/30">
+        <div className="flex items-center gap-2 mb-1">
+          <ArrowRight className="h-4 w-4 text-primary" />
+          <Label>Connect to Follow-Up Form</Label>
+        </div>
+        <p className="text-xs text-muted-foreground mb-2">After submitting this form, respondents will be directed to another form automatically.</p>
+        <Select value={followUpFormId} onValueChange={setFollowUpFormId}>
+          <SelectTrigger>
+            <SelectValue placeholder="No follow-up form" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">No follow-up form</SelectItem>
+            {linkableForms.map((f) => (
+              <SelectItem key={f.id} value={f.id}>{f.title}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {linkableForms.length === 0 && (
+          <p className="text-xs text-muted-foreground">Publish other forms first to connect them here.</p>
+        )}
       </div>
 
       <div className="space-y-3">
@@ -91,6 +128,7 @@ function FormBuilder({ form, userId, onClose, onSaved }: { form?: Form; userId: 
             <Plus className="mr-1 h-3.5 w-3.5" /> Add Field
           </Button>
         </div>
+
         {fields.length === 0 ? (
           <div className="text-center py-10 border border-dashed rounded-md">
             <p className="text-sm text-muted-foreground mb-3">No fields added yet</p>
@@ -118,16 +156,19 @@ function FormBuilder({ form, userId, onClose, onSaved }: { form?: Form; userId: 
                       </SelectContent>
                     </Select>
                     <div className="flex items-center gap-3">
-                      <div className="flex items-center gap-1.5">
-                        <Switch checked={field.required} onCheckedChange={(v) => updateField(index, { required: v })} data-testid={`switch-required-${index}`} />
-                        <Label className="text-xs">Required</Label>
-                      </div>
-                      <Button variant="ghost" size="icon" onClick={() => removeField(index)} data-testid={`button-remove-field-${index}`}>
+                      {field.type !== "image" && field.type !== "audio" && (
+                        <div className="flex items-center gap-1.5">
+                          <Switch checked={field.required} onCheckedChange={(v) => updateField(index, { required: v })} data-testid={`switch-required-${index}`} />
+                          <Label className="text-xs">Required</Label>
+                        </div>
+                      )}
+                      <Button variant="ghost" size="icon" onClick={() => removeField(index)} data-testid={`button-remove-field-${index}`} className="ml-auto">
                         <Trash2 className="h-4 w-4 text-muted-foreground" />
                       </Button>
                     </div>
                   </div>
                 </div>
+
                 {field.type === "select" && (
                   <div className="mt-3 ml-8">
                     <Label className="text-xs text-muted-foreground">Options (comma-separated)</Label>
@@ -138,6 +179,20 @@ function FormBuilder({ form, userId, onClose, onSaved }: { form?: Form; userId: 
                       className="mt-1"
                       data-testid={`input-field-options-${index}`}
                     />
+                  </div>
+                )}
+
+                {field.type === "image" && (
+                  <div className="mt-3 ml-8 flex items-center gap-2 text-xs text-muted-foreground">
+                    <Image className="h-4 w-4" />
+                    Respondents will be able to upload a photo (JPG, PNG, GIF)
+                  </div>
+                )}
+
+                {field.type === "audio" && (
+                  <div className="mt-3 ml-8 flex items-center gap-2 text-xs text-muted-foreground">
+                    <Mic className="h-4 w-4" />
+                    Respondents will be able to record or upload a voice memo
                   </div>
                 )}
               </Card>
@@ -203,6 +258,7 @@ export default function FormsPage() {
         <FormBuilder
           form={editingForm ?? undefined}
           userId={user?.id ?? ""}
+          allForms={forms}
           onClose={() => { setShowBuilder(false); setEditingForm(null); }}
           onSaved={loadForms}
         />
@@ -228,44 +284,59 @@ export default function FormsPage() {
         </div>
       ) : forms.length > 0 ? (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {forms.map((form) => (
-            <Card key={form.id} className="p-5 space-y-4 hover-elevate" data-testid={`card-form-${form.id}`}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h3 className="font-semibold truncate" data-testid={`text-form-name-${form.id}`}>{form.title}</h3>
-                  <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">{form.description ?? "No description"}</p>
+          {forms.map((form) => {
+            const followUpId = (form.settings as any)?.followUpFormId;
+            const followUp = followUpId ? forms.find(f => f.id === followUpId) : null;
+            const fieldTypes = (form.fields as FormField[]) ?? [];
+            const hasMedia = fieldTypes.some(f => f.type === "image" || f.type === "audio");
+
+            return (
+              <Card key={form.id} className="p-5 space-y-4 hover-elevate" data-testid={`card-form-${form.id}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="font-semibold truncate" data-testid={`text-form-name-${form.id}`}>{form.title}</h3>
+                    <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">{form.description ?? "No description"}</p>
+                  </div>
+                  <Badge variant={form.is_published ? "default" : "secondary"} className="shrink-0">
+                    {form.is_published ? "Published" : "Draft"}
+                  </Badge>
                 </div>
-                <Badge variant={form.is_published ? "default" : "secondary"} className="shrink-0">
-                  {form.is_published ? "Published" : "Draft"}
-                </Badge>
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {(form.fields as any[])?.length ?? 0} fields · {form.response_count ?? 0} responses
-              </div>
-              <div className="flex items-center gap-1.5 pt-1 border-t flex-wrap">
-                <Button variant="ghost" size="sm" onClick={() => setEditingForm(form)} data-testid={`button-edit-form-${form.id}`}>
-                  <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => setPreviewForm(form)} data-testid={`button-preview-form-${form.id}`}>
-                  <Eye className="mr-1 h-3.5 w-3.5" /> Preview
-                </Button>
-                <Link href={`/forms/${form.id}/submit`}>
-                  <Button variant="ghost" size="sm" data-testid={`button-fill-form-${form.id}`}>
-                    <Send className="mr-1 h-3.5 w-3.5" /> Fill
+
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span>{fieldTypes.length} fields · {form.response_count ?? 0} responses</span>
+                  {hasMedia && <Badge variant="outline" className="text-xs gap-1"><Image className="h-3 w-3" /> Media</Badge>}
+                  {followUp && (
+                    <Badge variant="outline" className="text-xs gap-1 text-primary border-primary/30">
+                      <ArrowRight className="h-3 w-3" /> {followUp.title}
+                    </Badge>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5 pt-1 border-t flex-wrap">
+                  <Button variant="ghost" size="sm" onClick={() => setEditingForm(form)} data-testid={`button-edit-form-${form.id}`}>
+                    <Pencil className="mr-1 h-3.5 w-3.5" /> Edit
                   </Button>
-                </Link>
-                <Button variant="ghost" size="sm" onClick={() => handleShare(form)} data-testid={`button-share-form-${form.id}`} title="Copy share link">
-                  <Link2 className="h-3.5 w-3.5" />
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => handleDuplicate(form)} data-testid={`button-duplicate-form-${form.id}`}>
-                  <Copy className="h-3.5 w-3.5" />
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => handleDelete(form.id)} data-testid={`button-delete-form-${form.id}`}>
-                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                </Button>
-              </div>
-            </Card>
-          ))}
+                  <Button variant="ghost" size="sm" onClick={() => setPreviewForm(form)} data-testid={`button-preview-form-${form.id}`}>
+                    <Eye className="mr-1 h-3.5 w-3.5" /> Preview
+                  </Button>
+                  <Link href={`/forms/${form.id}/submit`}>
+                    <Button variant="ghost" size="sm" data-testid={`button-fill-form-${form.id}`}>
+                      <Send className="mr-1 h-3.5 w-3.5" /> Fill
+                    </Button>
+                  </Link>
+                  <Button variant="ghost" size="sm" onClick={() => handleShare(form)} title="Copy share link">
+                    <Link2 className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => handleDuplicate(form)}>
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => handleDelete(form.id)}>
+                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                  </Button>
+                </div>
+              </Card>
+            );
+          })}
         </div>
       ) : (
         <div className="text-center py-20 space-y-4">
@@ -282,6 +353,7 @@ export default function FormsPage() {
         </div>
       )}
 
+      {/* Preview dialog */}
       <Dialog open={!!previewForm} onOpenChange={() => setPreviewForm(null)}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
@@ -312,8 +384,24 @@ export default function FormsPage() {
                       </SelectContent>
                     </Select>
                   )}
+                  {field.type === "image" && (
+                    <div className="flex items-center gap-2 p-3 border border-dashed rounded-md text-sm text-muted-foreground">
+                      <Image className="h-4 w-4" /> Photo upload field
+                    </div>
+                  )}
+                  {field.type === "audio" && (
+                    <div className="flex items-center gap-2 p-3 border border-dashed rounded-md text-sm text-muted-foreground">
+                      <Mic className="h-4 w-4" /> Voice memo field
+                    </div>
+                  )}
                 </div>
               ))}
+              {(previewForm.settings as any)?.followUpFormId && (
+                <div className="flex items-center gap-2 p-3 bg-primary/5 border border-primary/20 rounded-md text-sm text-primary">
+                  <ArrowRight className="h-4 w-4" />
+                  After submitting, respondents will be taken to another form
+                </div>
+              )}
             </div>
           )}
           <DialogFooter>
