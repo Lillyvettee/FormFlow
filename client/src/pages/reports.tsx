@@ -93,13 +93,6 @@ const filteredSubmissions = useMemo(() => {
 const hasActiveFilters = searchQuery || dateFrom || dateTo;
 const clearFilters = () => { setSearchQuery(""); setDateFrom(""); setDateTo(""); };
 
-  
-  const [volunteerHours, setVolunteerHours] = useState<any[]>([]);
-  const [inventory, setInventory] = useState<any[]>([]);
-  const [allSubmissions, setAllSubmissions] = useState<FormSubmission[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isExporting, setIsExporting] = useState(false);
-
   useEffect(() => {
     if (!user) return;
     const load = async () => {
