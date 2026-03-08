@@ -35,6 +35,23 @@ import {
   X,
   CalendarRange,
 } from "lucide-react";
+// comment
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+  AreaChart,
+  Area,
+  LineChart,
+  Line,
+} from "recharts";
 
 // supabase import
 import { supabase } from "@/lib/supabase";
