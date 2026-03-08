@@ -1,21 +1,36 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import {
   BarChart3, Download, FileText, FileDown, DollarSign, Clock,
-  Package, TrendingUp, Users, PieChart as PieIcon, AlertTriangle
+  Package, TrendingUp, Users, PieChart as PieIcon, AlertTriangle,
+  Search, X, CalendarRange
 } from "lucide-react";
+
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, LineChart, Line, AreaChart, Area, Legend
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, PieChart, Pie, Cell,
+  AreaChart, Area, LineChart, Line
 } from "recharts";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useState, useEffect, useMemo } from "react"; // add useMemo
+
+
+// supabase import
 import { supabase } from "@/lib/supabase";
+
+// useAuth import
 import { useAuth } from "@/hooks/use-auth";
-import type { Form, FormSubmission, FormField } from "@/types/database";
+
+// types 
+import { Form, FormField, FormSubmission } from "@/types/database";
 
 const COLORS = [
   "hsl(217, 91%, 35%)", "hsl(195, 80%, 32%)", "hsl(150, 58%, 30%)",
@@ -23,11 +38,11 @@ const COLORS = [
 ];
 
 const REPORT_TYPES = [
-  { value: "impact", label: "📊 Impact Overview", icon: TrendingUp },
-  { value: "donations", label: "💰 Donation Report", icon: DollarSign },
-  { value: "volunteers", label: "⏱️ Volunteer Hours Report", icon: Clock },
-  { value: "inventory", label: "📦 Inventory Report", icon: Package },
-  { value: "forms", label: "📋 Form Submissions Report", icon: FileText },
+  { value: "impact", label: "Impact Overview", icon: TrendingUp },
+  { value: "donations", label: "Donation Report", icon: DollarSign },
+  { value: "volunteers", label: "Volunteer Hours Report", icon: Clock },
+  { value: "inventory", label: "Inventory Report", icon: Package },
+  { value: "forms", label: "Form Submissions Report", icon: FileText },
 ];
 
 const tooltipStyle = {
@@ -44,6 +59,41 @@ export default function ReportsPage() {
   const [selectedFormId, setSelectedFormId] = useState("");
   const [submissions, setSubmissions] = useState<FormSubmission[]>([]);
   const [donations, setDonations] = useState<any[]>([]);
+  const [volunteerHours, setVolunteerHours] = useState<any[]>([]);
+  const [inventory, setInventory] = useState<any[]>([]);
+  const [allSubmissions, setAllSubmissions] = useState<FormSubmission[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isExporting, setIsExporting] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+const [dateFrom, setDateFrom] = useState("");
+const [dateTo, setDateTo] = useState("");
+
+const filteredSubmissions = useMemo(() => {
+  let result = submissions;
+  if (dateFrom) {
+    const from = new Date(dateFrom);
+    from.setHours(0, 0, 0, 0);
+    result = result.filter((s) => s.submitted_at && new Date(s.submitted_at) >= from);
+  }
+  if (dateTo) {
+    const to = new Date(dateTo);
+    to.setHours(23, 59, 59, 999);
+    result = result.filter((s) => s.submitted_at && new Date(s.submitted_at) <= to);
+  }
+  if (searchQuery.trim()) {
+    const q = searchQuery.trim().toLowerCase();
+    result = result.filter((s) => {
+      const data = s.data as Record<string, any>;
+      return Object.values(data ?? {}).some((val) => String(val ?? "").toLowerCase().includes(q));
+    });
+  }
+  return result;
+}, [submissions, searchQuery, dateFrom, dateTo]);
+
+const hasActiveFilters = searchQuery || dateFrom || dateTo;
+const clearFilters = () => { setSearchQuery(""); setDateFrom(""); setDateTo(""); };
+
+  
   const [volunteerHours, setVolunteerHours] = useState<any[]>([]);
   const [inventory, setInventory] = useState<any[]>([]);
   const [allSubmissions, setAllSubmissions] = useState<FormSubmission[]>([]);
@@ -84,6 +134,9 @@ export default function ReportsPage() {
       const { data } = await supabase.from("form_submissions").select("*")
         .eq("form_id", selectedFormId).order("submitted_at", { ascending: false });
       setSubmissions(data ?? []);
+      setSearchQuery("");
+      setDateFrom("");
+      setDateTo("");
     };
     load();
   }, [selectedFormId]);
@@ -148,7 +201,7 @@ export default function ReportsPage() {
   const formFields = (selectedForm?.fields as FormField[]) ?? [];
 
   const getFieldSummary = (field: FormField) => {
-    const values = submissions.map(s => (s.data as any)?.[field.id]).filter(v => v !== undefined && v !== null && v !== "");
+    const values = filteredSubmissions.map((s) => (s.data as any)?.[field.id]).filter(v => v !== undefined && v !== null && v !== "");
     if (field.type === "number") {
       const nums = values.map(Number).filter(n => !isNaN(n));
       if (!nums.length) return null;
@@ -730,39 +783,65 @@ export default function ReportsPage() {
           </div>
 
           {!selectedFormId ? (
-            <Card className="p-6">
-              <h3 className="font-semibold mb-4">Submissions by Form</h3>
-              {forms.length > 0 ? (
-                <div className="h-56">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={forms.map(f => ({ name: f.title.length > 16 ? f.title.slice(0, 16) + "…" : f.title, submissions: allSubmissions.filter(s => s.form_id === f.id).length }))}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                      <XAxis dataKey="name" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} />
-                      <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} allowDecimals={false} />
-                      <Tooltip contentStyle={tooltipStyle} />
-                      <Bar dataKey="submissions" fill={COLORS[0]} radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : <p className="text-sm text-muted-foreground text-center py-12">No forms yet</p>}
-            </Card>
-          ) : submissions.length === 0 ? (
-            <div className="text-center py-16 text-sm text-muted-foreground">No submissions for this form yet</div>
-          ) : (
-            <>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                {[
-                  { label: "Total", value: submissions.length },
-                  { label: "This Week", value: submissions.filter(s => new Date(s.submitted_at) > new Date(Date.now() - 7 * 86400000)).length },
-                  { label: "This Month", value: submissions.filter(s => new Date(s.submitted_at) > new Date(Date.now() - 30 * 86400000)).length },
-                  { label: "Fields", value: formFields.length },
-                ].map(s => (
-                  <Card key={s.label} className="p-4 text-center">
-                    <p className="text-2xl font-bold">{s.value}</p>
-                    <p className="text-xs text-muted-foreground mt-1">{s.label}</p>
-                  </Card>
-                ))}
-              </div>
+<div className="space-y-4">
+  <div className="flex items-center gap-3">
+    <Select value={selectedFormId} onValueChange={setSelectedFormId}>
+      <SelectTrigger className="w-72"><SelectValue placeholder="Select a form…" /></SelectTrigger>
+      <SelectContent>
+        {forms.map(f => <SelectItem key={f.id} value={f.id}>{f.title}</SelectItem>)}
+      </SelectContent>
+    </Select>
+    {selectedFormId && (
+      <Badge variant="secondary">
+        {filteredSubmissions.length}
+        {hasActiveFilters && filteredSubmissions.length !== submissions.length
+          ? ` of ${submissions.length}`
+          : ""} submissions
+      </Badge>
+    )}
+  </div>
+
+  {selectedFormId && submissions.length > 0 && (
+    <div className="p-4 rounded-lg border bg-muted/30 space-y-3">
+      <div className="flex items-center gap-2">
+        <CalendarRange className="h-4 w-4 text-muted-foreground" />
+        <span className="text-sm font-medium">Filter Submissions</span>
+        {hasActiveFilters && (
+          <Button variant="ghost" size="sm" onClick={clearFilters} className="ml-auto h-7 text-xs text-muted-foreground">
+            <X className="mr-1 h-3 w-3" /> Clear filters
+          </Button>
+        )}
+      </div>
+      <div className="grid sm:grid-cols-3 gap-3">
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Search responses</Label>
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              placeholder="Search all fields..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-8 h-9 text-sm"
+            />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery("")} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">From date</Label>
+          <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="h-9 text-sm" />
+        </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">To date</Label>
+          <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-9 text-sm" />
+        </div>
+      </div>
+    </div>
+  )}
+</div>
 
               {submissionsByDate().length > 1 && (
                 <Card className="p-6">
@@ -834,13 +913,13 @@ export default function ReportsPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {submissions.map((sub, idx) => (
-                      <TableRow key={sub.id}>
-                        <TableCell className="text-muted-foreground text-xs">{idx + 1}</TableCell>
-                        {formFields.map(f => <TableCell key={f.id} className="max-w-[160px] truncate">{String((sub.data as any)?.[f.id] ?? "-")}</TableCell>)}
-                        <TableCell className="text-xs text-muted-foreground">{new Date(sub.submitted_at).toLocaleDateString()}</TableCell>
-                      </TableRow>
-                    ))}
+                    {filteredSubmissions.map((sub, idx) => (
+                    <TableRow key={sub.id}>
+                      <TableCell className="text-muted-foreground text-xs">{idx + 1}</TableCell>
+                      {formFields.map(f => <TableCell key={f.id} className="max-w-[160px] truncate">{String((sub.data as any)?.[f.id] ?? "-")}</TableCell>)}
+                      <TableCell className="text-xs text-muted-foreground">{new Date(sub.submitted_at).toLocaleDateString()}</TableCell>
+                    </TableRow>
+                  ))}
                   </TableBody>
                 </Table>
               </Card>

@@ -32,7 +32,7 @@ export default function SettingsPage() {
 
   // Branding
   const [companyName, setCompanyName] = useState("");
-  const [primaryColor, setPrimaryColor] = useState("#1a56db");
+  const [primaryColor, setThemeColor] = useState("#1a56db");
   const [logoUrl, setLogoUrl] = useState("");
   const [isSavingBranding, setIsSavingBranding] = useState(false);
   const [brandingLoading, setBrandingLoading] = useState(true);

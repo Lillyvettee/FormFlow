@@ -23,7 +23,7 @@ const FEATURES = [
   {
     icon: Clock,
     title: "Volunteer Hours Tracker",
-    desc: "Log volunteer hours by person and activity. See your top contributors and total impact hours — essential for grant applications.",
+    desc: "Log volunteer hours by person and activity. See your top contributors and total impact hours: essential for grant applications.",
     color: "bg-violet-500/10 text-violet-600",
   },
   {
@@ -35,7 +35,7 @@ const FEATURES = [
   {
     icon: BarChart3,
     title: "Visual Impact Reports",
-    desc: "Five report types — Impact Overview, Donations, Volunteer Hours, Inventory, and Form Submissions — all with charts and PDF export.",
+    desc: "Five report types: Impact Overview, Donations, Volunteer Hours, Inventory, and Form Submissions: all with charts and PDF export.",
     color: "bg-rose-500/10 text-rose-600",
   },
   {
@@ -55,24 +55,6 @@ const FEATURES = [
     title: "Live Dashboard",
     desc: "See total raised, volunteer hours, submissions, and low-stock alerts the moment you log in. Real data, not placeholders.",
     color: "bg-indigo-500/10 text-indigo-600",
-  },
-];
-
-const TESTIMONIALS = [
-  {
-    quote: "FormFlow replaced four different tools we were using. Now everything is in one place and our grant reports take minutes instead of days.",
-    author: "Maria S.",
-    org: "Community Food Bank",
-  },
-  {
-    quote: "The volunteer hours tracker alone is worth it. We used to track this in a spreadsheet — now it just works, and we have beautiful charts to show funders.",
-    author: "James T.",
-    org: "Youth Mentorship Alliance",
-  },
-  {
-    quote: "Our team loves that they can submit forms with photos right from their phones. The media library makes it so easy to document our work.",
-    author: "Priya K.",
-    org: "Neighborhood Outreach Center",
   },
 ];
 
@@ -149,7 +131,7 @@ export default function LandingPage() {
             </h1>
 
             <p className="text-xl text-muted-foreground leading-relaxed max-w-2xl mx-auto">
-              FormFlow gives non-profits one place to manage forms, donations, volunteer hours, inventory, and visual impact reports — everything you need for grant applications and board reporting.
+              FormFlow gives non-profits one place to manage forms, donations, volunteer hours, inventory, and visual impact reports: everything you need for grant applications and board reporting.
             </p>
 
             <div className="flex flex-wrap items-center justify-center gap-3">
@@ -222,7 +204,7 @@ export default function LandingPage() {
                 </div>
                 {/* Fake chart bars */}
                 <div className="rounded-lg border p-4">
-                  <p className="text-sm font-medium mb-3">Submissions — Last 14 Days</p>
+                  <p className="text-sm font-medium mb-3">Submissions: Last 14 Days</p>
                   <div className="flex items-end gap-1.5 h-20">
                     {[3, 5, 4, 8, 6, 12, 9, 7, 11, 14, 10, 8, 13, 16].map((h, i) => (
                       <div key={i} className="flex-1 rounded-t-sm bg-primary/80 transition-all" style={{ height: `${(h / 16) * 100}%` }} />
@@ -266,9 +248,9 @@ export default function LandingPage() {
             <p className="text-sm font-medium text-primary uppercase tracking-widest">Impact Reporting</p>
             <h2 className="text-4xl font-serif font-bold leading-tight">Beautiful reports for every stakeholder</h2>
             <p className="text-muted-foreground text-lg leading-relaxed">
-              Generate 5 different visual report types — Impact Overview, Donations, Volunteer Hours, Inventory, and Form Submissions. Every report exports to PDF and CSV, ready for your board, donors, and grant applications.
+              Generate visual report types covering Impact Overview, Donations, Volunteer Hours, Inventory, and Form Submissions. Every report exports to PDF and CSV, ready for your board, donors, and grant applications.
             </p>
-            <div className="space-y-3">
+            <div className="space-y-3 pt-2">
               {[
                 "Donation trends with area charts",
                 "Top volunteer leaderboards",
@@ -354,7 +336,7 @@ export default function LandingPage() {
               </div>
               <div className="flex-1">
                 <p className="text-sm font-medium">Connected Form Sequences</p>
-                <p className="text-xs text-muted-foreground">Chain forms together — submit one, get routed to the next</p>
+                <p className="text-xs text-muted-foreground">Chain forms together: submit one, get routed to the next</p>
               </div>
               <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
             </Card>
@@ -364,39 +346,13 @@ export default function LandingPage() {
             <p className="text-sm font-medium text-primary uppercase tracking-widest">Form Builder</p>
             <h2 className="text-4xl font-serif font-bold leading-tight">Forms that go beyond text fields</h2>
             <p className="text-muted-foreground text-lg leading-relaxed">
-              Collect richer data from your community. Add photo upload and voice memo fields to any form. Chain forms together for multi-step intake workflows. Share a public link — no login required for respondents.
+              Collect richer data from your community. Add photo upload and voice memo fields to any form. Chain forms together for multi-step intake workflows. Share a public link: no login required for respondents.
             </p>
             <a href="/signup">
               <Button>
                 Build Your First Form <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             </a>
-          </div>
-        </div>
-      </section>
-
-      {/* Testimonials */}
-      <section className="py-24 px-6">
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-14 space-y-3">
-            <p className="text-sm font-medium text-primary uppercase tracking-widest">Testimonials</p>
-            <h2 className="text-4xl font-serif font-bold">Non-profits love FormFlow</h2>
-          </div>
-          <div className="grid sm:grid-cols-3 gap-6">
-            {TESTIMONIALS.map((t) => (
-              <Card key={t.author} className="p-6 space-y-4 hover-elevate">
-                <div className="flex gap-0.5">
-                  {[1,2,3,4,5].map(i => (
-                    <span key={i} className="text-chart-4 text-sm">★</span>
-                  ))}
-                </div>
-                <p className="text-sm text-muted-foreground leading-relaxed italic">"{t.quote}"</p>
-                <div>
-                  <p className="font-semibold text-sm">{t.author}</p>
-                  <p className="text-xs text-muted-foreground">{t.org}</p>
-                </div>
-              </Card>
-            ))}
           </div>
         </div>
       </section>
