@@ -22,21 +22,19 @@ import {
 import { Badge } from "@/components/ui/badge";
 
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  AreaChart,
-  Area,
-  LineChart,
-  Line,
-} from "recharts";
+  BarChart3,
+  Download,
+  FileText,
+  FileDown,
+  DollarSign,
+  Clock,
+  Package,
+  TrendingUp,
+  AlertTriangle,
+  Search,
+  X,
+  CalendarRange,
+} from "lucide-react";
 
 // supabase import
 import { supabase } from "@/lib/supabase";
