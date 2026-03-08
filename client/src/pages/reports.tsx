@@ -832,12 +832,10 @@ const clearFilters = () => { setSearchQuery(""); setDateFrom(""); setDateTo("");
           <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-9 text-sm" />
         </div>
       </div>
-    </div>
-  )}
-</div>
+    )}
 
-              {submissionsByDate().length > 1 && (
-                <Card className="p-6">
+{submissionsByDate().length > 1 && (
+  <Card className="p-6">
                   <h3 className="font-semibold mb-4">Submissions Over Time</h3>
                   <div className="h-48">
                     <ResponsiveContainer width="100%" height="100%">
@@ -845,7 +843,7 @@ const clearFilters = () => { setSearchQuery(""); setDateFrom(""); setDateTo("");
                         <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                         <XAxis dataKey="date" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} />
                         <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 11 }} allowDecimals={false} />
-                        <Tooltip contentStyle={tooltipStyle} />
+     <Tooltip contentStyle={tooltipStyle} />
                         <Line type="monotone" dataKey="count" stroke={COLORS[0]} strokeWidth={2} dot={false} name="Submissions" />
                       </LineChart>
                     </ResponsiveContainer>
