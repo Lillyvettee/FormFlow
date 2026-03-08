@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,22 +20,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import {
-  BarChart3,
-  Download,
-  FileText,
-  FileDown,
-  DollarSign,
-  Clock,
-  Package,
-  TrendingUp,
-  Users,
-  PieChart as PieIcon,
-  AlertTriangle,
-  Search,
-  X,
-  CalendarRange,
-} from "lucide-react";
 
 import {
   BarChart,
@@ -61,7 +45,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
 
 // types
-import { Form, FormField, FormSubmission } from "@/types/database";
+import type { Form, FormField, FormSubmission } from "@/types/database";
 
 const COLORS = [
   "hsl(217, 91%, 35%)",
