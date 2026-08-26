@@ -117,7 +117,7 @@ export default function LandingPage() {
               className="font-serif font-bold text-lg tracking-tight"
               data-testid="text-app-name"
             >
-              FormFlow
+              HumMotion
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -378,27 +378,27 @@ export default function LandingPage() {
             {[
               {
                 icon: TrendingUp,
-                label: "📊 Impact Overview",
+                label: "Impact Overview",
                 desc: "Total raised, hours, submissions at a glance",
               },
               {
                 icon: DollarSign,
-                label: "💰 Donation Report",
+                label: "Donation Report",
                 desc: "Trends, campaigns, payment methods",
               },
               {
                 icon: Clock,
-                label: "⏱️ Volunteer Hours Report",
+                label: "Volunteer Hours Report",
                 desc: "Top volunteers, activities, hours over time",
               },
               {
                 icon: Package,
-                label: "📦 Inventory Report",
+                label: "nventory Report",
                 desc: "Stock levels, categories, restock alerts",
               },
               {
                 icon: FileText,
-                label: "📋 Form Submissions Report",
+                label: "Form Submissions Report",
                 desc: "Per-field charts, response timeline, raw data",
               },
             ].map((r, i) => (
