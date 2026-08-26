@@ -163,7 +163,7 @@ export default function LandingPage() {
             </h1>
 
             <p className="text-xl text-muted-foreground leading-relaxed max-w-2xl mx-auto">
-              FormFlow gives non-profits one place to manage forms, donations,
+              HumMotion gives non-profits one place to manage forms, donations,
               volunteer hours, inventory, and visual impact reports: everything
               you need for grant applications and board reporting.
             </p>
@@ -568,7 +568,7 @@ export default function LandingPage() {
             Ready to amplify your impact?
           </h2>
           <p className="text-muted-foreground text-xl leading-relaxed">
-            Join non-profits using FormFlow to collect data, track donations,
+            Join non-profits using HumMotion to collect data, track donations,
             log volunteer hours, and generate the reports that win grants.
           </p>
           <div className="flex flex-wrap justify-center gap-3">
@@ -601,7 +601,7 @@ export default function LandingPage() {
               <Heart className="h-3.5 w-3.5 text-primary-foreground" />
             </div>
             <span className="font-serif font-bold text-foreground">
-              FormFlow
+              HumMotion
             </span>
             <span>· Built for non-profits</span>
           </div>
@@ -626,7 +626,7 @@ export default function LandingPage() {
             </a>
           </div>
           <p>
-            &copy; {new Date().getFullYear()} FormFlow. All rights reserved.
+            &copy; {new Date().getFullYear()} HumMotion. All rights reserved.
           </p>
         </div>
       </footer>
