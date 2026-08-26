@@ -2,9 +2,23 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
-  BarChart3, FileText, Package, ArrowRight, Heart, Shield,
-  DollarSign, Clock, Image, Link2, MessageSquare, FolderOpen,
-  CheckCircle2, TrendingUp, Users, Mic, ChevronRight
+  BarChart3,
+  FileText,
+  Package,
+  ArrowRight,
+  Heart,
+  Shield,
+  DollarSign,
+  Clock,
+  Image,
+  Link2,
+  MessageSquare,
+  FolderOpen,
+  CheckCircle2,
+  TrendingUp,
+  Users,
+  Mic,
+  ChevronRight,
 } from "lucide-react";
 
 const FEATURES = [
@@ -99,12 +113,25 @@ export default function LandingPage() {
             <div className="h-8 w-8 rounded-md bg-primary flex items-center justify-center">
               <Heart className="h-4 w-4 text-primary-foreground" />
             </div>
-            <span className="font-serif font-bold text-lg tracking-tight" data-testid="text-app-name">FormFlow</span>
+            <span
+              className="font-serif font-bold text-lg tracking-tight"
+              data-testid="text-app-name"
+            >
+              FormFlow
+            </span>
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggle />
-            <a href="/login"><Button variant="ghost" size="sm" data-testid="button-login">Sign In</Button></a>
-            <a href="/signup"><Button size="sm" data-testid="button-signup">Get Started Free</Button></a>
+            <a href="/login">
+              <Button variant="ghost" size="sm" data-testid="button-login">
+                Sign In
+              </Button>
+            </a>
+            <a href="/signup">
+              <Button size="sm" data-testid="button-signup">
+                Get Started Free
+              </Button>
+            </a>
           </div>
         </div>
       </nav>
@@ -124,19 +151,30 @@ export default function LandingPage() {
               Built exclusively for non-profits
             </div>
 
-            <h1 className="text-5xl sm:text-6xl lg:text-7xl font-serif font-bold tracking-tight leading-[1.05]" data-testid="text-hero-title">
-              Collect data.<br />
-              Track impact.<br />
+            <h1
+              className="text-5xl sm:text-6xl lg:text-7xl font-serif font-bold tracking-tight leading-[1.05]"
+              data-testid="text-hero-title"
+            >
+              Collect data.
+              <br />
+              Track impact.
+              <br />
               <span className="text-primary">Amplify your mission.</span>
             </h1>
 
             <p className="text-xl text-muted-foreground leading-relaxed max-w-2xl mx-auto">
-              FormFlow gives non-profits one place to manage forms, donations, volunteer hours, inventory, and visual impact reports: everything you need for grant applications and board reporting.
+              FormFlow gives non-profits one place to manage forms, donations,
+              volunteer hours, inventory, and visual impact reports: everything
+              you need for grant applications and board reporting.
             </p>
 
             <div className="flex flex-wrap items-center justify-center gap-3">
               <a href="/signup">
-                <Button size="lg" className="text-base px-8" data-testid="button-get-started">
+                <Button
+                  size="lg"
+                  className="text-base px-8"
+                  data-testid="button-get-started"
+                >
                   Get Started Free <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </a>
@@ -173,28 +211,65 @@ export default function LandingPage() {
                   <div className="h-3 w-3 rounded-full bg-chart-2/50" />
                 </div>
                 <div className="flex-1 mx-4 h-6 bg-background rounded-md flex items-center px-3">
-                  <span className="text-xs text-muted-foreground">app.formflow.org/dashboard</span>
+                  <span className="text-xs text-muted-foreground">
+                    app.HumMotion.org/dashboard
+                  </span>
                 </div>
               </div>
               {/* Dashboard preview */}
               <div className="p-6 bg-background space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="font-serif font-bold text-lg">Good morning, Sarah 👋</p>
-                    <p className="text-sm text-muted-foreground">Here's your organization's impact at a glance</p>
+                    <p className="font-serif font-bold text-lg">
+                      Good morning, Olive{" "}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Here's your organization's impact at a glance
+                    </p>
                   </div>
                 </div>
                 <div className="grid grid-cols-4 gap-3">
                   {[
-                    { label: "Total Raised", value: "$24,850", icon: DollarSign, color: "text-emerald-600", bg: "bg-emerald-50 dark:bg-emerald-950/30" },
-                    { label: "Volunteer Hours", value: "1,284", icon: Clock, color: "text-violet-600", bg: "bg-violet-50 dark:bg-violet-950/30" },
-                    { label: "Form Submissions", value: "647", icon: FileText, color: "text-blue-600", bg: "bg-blue-50 dark:bg-blue-950/30" },
-                    { label: "Active Forms", value: "12", icon: BarChart3, color: "text-rose-600", bg: "bg-rose-50 dark:bg-rose-950/30" },
-                  ].map(stat => (
-                    <div key={stat.label} className="p-3 rounded-lg border bg-card space-y-1">
+                    {
+                      label: "Total Raised",
+                      value: "$24,850",
+                      icon: DollarSign,
+                      color: "text-emerald-600",
+                      bg: "bg-emerald-50 dark:bg-emerald-950/30",
+                    },
+                    {
+                      label: "Volunteer Hours",
+                      value: "1,284",
+                      icon: Clock,
+                      color: "text-violet-600",
+                      bg: "bg-violet-50 dark:bg-violet-950/30",
+                    },
+                    {
+                      label: "Form Submissions",
+                      value: "647",
+                      icon: FileText,
+                      color: "text-blue-600",
+                      bg: "bg-blue-50 dark:bg-blue-950/30",
+                    },
+                    {
+                      label: "Active Forms",
+                      value: "12",
+                      icon: BarChart3,
+                      color: "text-rose-600",
+                      bg: "bg-rose-50 dark:bg-rose-950/30",
+                    },
+                  ].map((stat) => (
+                    <div
+                      key={stat.label}
+                      className="p-3 rounded-lg border bg-card space-y-1"
+                    >
                       <div className="flex items-center justify-between">
-                        <p className="text-xs text-muted-foreground">{stat.label}</p>
-                        <div className={`h-7 w-7 rounded-md ${stat.bg} flex items-center justify-center`}>
+                        <p className="text-xs text-muted-foreground">
+                          {stat.label}
+                        </p>
+                        <div
+                          className={`h-7 w-7 rounded-md ${stat.bg} flex items-center justify-center`}
+                        >
                           <stat.icon className={`h-3.5 w-3.5 ${stat.color}`} />
                         </div>
                       </div>
@@ -204,11 +279,19 @@ export default function LandingPage() {
                 </div>
                 {/* Fake chart bars */}
                 <div className="rounded-lg border p-4">
-                  <p className="text-sm font-medium mb-3">Submissions: Last 14 Days</p>
+                  <p className="text-sm font-medium mb-3">
+                    Submissions: Last 14 Days
+                  </p>
                   <div className="flex items-end gap-1.5 h-20">
-                    {[3, 5, 4, 8, 6, 12, 9, 7, 11, 14, 10, 8, 13, 16].map((h, i) => (
-                      <div key={i} className="flex-1 rounded-t-sm bg-primary/80 transition-all" style={{ height: `${(h / 16) * 100}%` }} />
-                    ))}
+                    {[3, 5, 4, 8, 6, 12, 9, 7, 11, 14, 10, 8, 13, 16].map(
+                      (h, i) => (
+                        <div
+                          key={i}
+                          className="flex-1 rounded-t-sm bg-primary/80 transition-all"
+                          style={{ height: `${(h / 16) * 100}%` }}
+                        />
+                      ),
+                    )}
                   </div>
                 </div>
               </div>
@@ -221,20 +304,32 @@ export default function LandingPage() {
       <section className="py-24 px-6 bg-muted/30">
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-16 space-y-3">
-            <p className="text-sm font-medium text-primary uppercase tracking-widest">Everything you need</p>
-            <h2 className="text-4xl font-serif font-bold">Tools built for your mission</h2>
+            <p className="text-sm font-medium text-primary uppercase tracking-widest">
+              Everything you need
+            </p>
+            <h2 className="text-4xl font-serif font-bold">
+              Tools built for your mission
+            </h2>
             <p className="text-muted-foreground max-w-xl mx-auto text-lg">
-              Replace the spreadsheets, Google Forms, and disconnected tools with one platform made for non-profits.
+              Replace the spreadsheets, Google Forms, and disconnected tools
+              with one platform made for non-profits.
             </p>
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-5">
             {FEATURES.map((feature) => (
-              <Card key={feature.title} className="p-5 space-y-3 hover-elevate border-0 shadow-sm bg-background">
-                <div className={`h-10 w-10 rounded-lg flex items-center justify-center ${feature.color}`}>
+              <Card
+                key={feature.title}
+                className="p-5 space-y-3 hover-elevate border-0 shadow-sm bg-background"
+              >
+                <div
+                  className={`h-10 w-10 rounded-lg flex items-center justify-center ${feature.color}`}
+                >
                   <feature.icon className="h-5 w-5" />
                 </div>
                 <h3 className="font-semibold">{feature.title}</h3>
-                <p className="text-sm text-muted-foreground leading-relaxed">{feature.desc}</p>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  {feature.desc}
+                </p>
               </Card>
             ))}
           </div>
@@ -245,10 +340,17 @@ export default function LandingPage() {
       <section className="py-24 px-6">
         <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-16 items-center">
           <div className="space-y-6">
-            <p className="text-sm font-medium text-primary uppercase tracking-widest">Impact Reporting</p>
-            <h2 className="text-4xl font-serif font-bold leading-tight">Beautiful reports for every stakeholder</h2>
+            <p className="text-sm font-medium text-primary uppercase tracking-widest">
+              Impact Reporting
+            </p>
+            <h2 className="text-4xl font-serif font-bold leading-tight">
+              Beautiful reports for every stakeholder
+            </h2>
             <p className="text-muted-foreground text-lg leading-relaxed">
-              Generate visual report types covering Impact Overview, Donations, Volunteer Hours, Inventory, and Form Submissions. Every report exports to PDF and CSV, ready for your board, donors, and grant applications.
+              Generate visual report types covering Impact Overview, Donations,
+              Volunteer Hours, Inventory, and Form Submissions. Every report
+              exports to PDF and CSV, ready for your board, donors, and grant
+              applications.
             </p>
             <div className="space-y-3 pt-2">
               {[
@@ -257,7 +359,7 @@ export default function LandingPage() {
                 "Form response breakdowns with pie charts",
                 "Inventory stock level alerts",
                 "One-click PDF with your org's branding",
-              ].map(item => (
+              ].map((item) => (
                 <div key={item} className="flex items-center gap-2 text-sm">
                   <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
                   <span>{item}</span>
@@ -274,13 +376,36 @@ export default function LandingPage() {
           {/* Report type pills */}
           <div className="space-y-3">
             {[
-              { icon: TrendingUp, label: "📊 Impact Overview", desc: "Total raised, hours, submissions at a glance" },
-              { icon: DollarSign, label: "💰 Donation Report", desc: "Trends, campaigns, payment methods" },
-              { icon: Clock, label: "⏱️ Volunteer Hours Report", desc: "Top volunteers, activities, hours over time" },
-              { icon: Package, label: "📦 Inventory Report", desc: "Stock levels, categories, restock alerts" },
-              { icon: FileText, label: "📋 Form Submissions Report", desc: "Per-field charts, response timeline, raw data" },
+              {
+                icon: TrendingUp,
+                label: "📊 Impact Overview",
+                desc: "Total raised, hours, submissions at a glance",
+              },
+              {
+                icon: DollarSign,
+                label: "💰 Donation Report",
+                desc: "Trends, campaigns, payment methods",
+              },
+              {
+                icon: Clock,
+                label: "⏱️ Volunteer Hours Report",
+                desc: "Top volunteers, activities, hours over time",
+              },
+              {
+                icon: Package,
+                label: "📦 Inventory Report",
+                desc: "Stock levels, categories, restock alerts",
+              },
+              {
+                icon: FileText,
+                label: "📋 Form Submissions Report",
+                desc: "Per-field charts, response timeline, raw data",
+              },
             ].map((r, i) => (
-              <div key={r.label} className="flex items-center gap-4 p-4 rounded-xl border bg-card hover:border-primary/40 transition-colors group">
+              <div
+                key={r.label}
+                className="flex items-center gap-4 p-4 rounded-xl border bg-card hover:border-primary/40 transition-colors group"
+              >
                 <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/20 transition-colors">
                   <r.icon className="h-5 w-5 text-primary" />
                 </div>
@@ -306,7 +431,9 @@ export default function LandingPage() {
               </div>
               <div className="flex-1">
                 <p className="text-sm font-medium">Text, Email, Number, Date</p>
-                <p className="text-xs text-muted-foreground">Standard form fields</p>
+                <p className="text-xs text-muted-foreground">
+                  Standard form fields
+                </p>
               </div>
               <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
             </Card>
@@ -316,7 +443,9 @@ export default function LandingPage() {
               </div>
               <div className="flex-1">
                 <p className="text-sm font-medium">Photo Upload</p>
-                <p className="text-xs text-muted-foreground">Respondents upload images directly from their phone</p>
+                <p className="text-xs text-muted-foreground">
+                  Respondents upload images directly from their phone
+                </p>
               </div>
               <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
             </Card>
@@ -326,7 +455,9 @@ export default function LandingPage() {
               </div>
               <div className="flex-1">
                 <p className="text-sm font-medium">Voice Memo</p>
-                <p className="text-xs text-muted-foreground">Record or upload audio directly in the form</p>
+                <p className="text-xs text-muted-foreground">
+                  Record or upload audio directly in the form
+                </p>
               </div>
               <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
             </Card>
@@ -336,17 +467,26 @@ export default function LandingPage() {
               </div>
               <div className="flex-1">
                 <p className="text-sm font-medium">Connected Form Sequences</p>
-                <p className="text-xs text-muted-foreground">Chain forms together: submit one, get routed to the next</p>
+                <p className="text-xs text-muted-foreground">
+                  Chain forms together: submit one, get routed to the next
+                </p>
               </div>
               <CheckCircle2 className="h-4 w-4 text-primary shrink-0" />
             </Card>
           </div>
 
           <div className="space-y-6 order-1 lg:order-2">
-            <p className="text-sm font-medium text-primary uppercase tracking-widest">Form Builder</p>
-            <h2 className="text-4xl font-serif font-bold leading-tight">Forms that go beyond text fields</h2>
+            <p className="text-sm font-medium text-primary uppercase tracking-widest">
+              Form Builder
+            </p>
+            <h2 className="text-4xl font-serif font-bold leading-tight">
+              Forms that go beyond text fields
+            </h2>
             <p className="text-muted-foreground text-lg leading-relaxed">
-              Collect richer data from your community. Add photo upload and voice memo fields to any form. Chain forms together for multi-step intake workflows. Share a public link: no login required for respondents.
+              Collect richer data from your community. Add photo upload and
+              voice memo fields to any form. Chain forms together for multi-step
+              intake workflows. Share a public link: no login required for
+              respondents.
             </p>
             <a href="/signup">
               <Button>
@@ -361,27 +501,42 @@ export default function LandingPage() {
       <section className="py-24 px-6 bg-muted/30">
         <div className="max-w-4xl mx-auto">
           <div className="text-center mb-14 space-y-3">
-            <p className="text-sm font-medium text-primary uppercase tracking-widest">Pricing</p>
-            <h2 className="text-4xl font-serif font-bold">Priced for non-profit budgets</h2>
-            <p className="text-muted-foreground text-lg">Spend your funds on your mission, not your tools.</p>
+            <p className="text-sm font-medium text-primary uppercase tracking-widest">
+              Pricing
+            </p>
+            <h2 className="text-4xl font-serif font-bold">
+              Priced for non-profit budgets
+            </h2>
+            <p className="text-muted-foreground text-lg">
+              Spend your funds on your mission, not your tools.
+            </p>
           </div>
           <div className="grid sm:grid-cols-2 gap-6">
             {PLANS.map((plan) => (
-              <Card key={plan.name} className={`p-8 space-y-6 ${plan.highlight ? "border-primary ring-2 ring-primary shadow-lg" : ""}`}>
+              <Card
+                key={plan.name}
+                className={`p-8 space-y-6 ${plan.highlight ? "border-primary ring-2 ring-primary shadow-lg" : ""}`}
+              >
                 <div className="space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-xl font-serif font-bold">{plan.name}</h3>
+                    <h3 className="text-xl font-serif font-bold">
+                      {plan.name}
+                    </h3>
                     {plan.badge && (
-                      <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-primary text-primary-foreground">{plan.badge}</span>
+                      <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-primary text-primary-foreground">
+                        {plan.badge}
+                      </span>
                     )}
                   </div>
                   <div className="flex items-baseline gap-1">
                     <span className="text-4xl font-bold">{plan.price}</span>
-                    <span className="text-muted-foreground text-sm">/{plan.period}</span>
+                    <span className="text-muted-foreground text-sm">
+                      /{plan.period}
+                    </span>
                   </div>
                 </div>
                 <ul className="space-y-2.5">
-                  {plan.features.map(f => (
+                  {plan.features.map((f) => (
                     <li key={f} className="flex items-start gap-2 text-sm">
                       <CheckCircle2 className="h-4 w-4 text-primary shrink-0 mt-0.5" />
                       <span>{f}</span>
@@ -389,7 +544,11 @@ export default function LandingPage() {
                   ))}
                 </ul>
                 <a href="/signup" className="block">
-                  <Button className="w-full" variant={plan.highlight ? "default" : "outline"} size="lg">
+                  <Button
+                    className="w-full"
+                    variant={plan.highlight ? "default" : "outline"}
+                    size="lg"
+                  >
                     {plan.cta} <ArrowRight className="ml-2 h-4 w-4" />
                   </Button>
                 </a>
@@ -405,13 +564,20 @@ export default function LandingPage() {
           <div className="h-16 w-16 rounded-2xl bg-primary flex items-center justify-center mx-auto">
             <Heart className="h-8 w-8 text-primary-foreground" />
           </div>
-          <h2 className="text-4xl sm:text-5xl font-serif font-bold">Ready to amplify your impact?</h2>
+          <h2 className="text-4xl sm:text-5xl font-serif font-bold">
+            Ready to amplify your impact?
+          </h2>
           <p className="text-muted-foreground text-xl leading-relaxed">
-            Join non-profits using FormFlow to collect data, track donations, log volunteer hours, and generate the reports that win grants.
+            Join non-profits using FormFlow to collect data, track donations,
+            log volunteer hours, and generate the reports that win grants.
           </p>
           <div className="flex flex-wrap justify-center gap-3">
             <a href="/signup">
-              <Button size="lg" className="text-base px-10" data-testid="button-cta-bottom">
+              <Button
+                size="lg"
+                className="text-base px-10"
+                data-testid="button-cta-bottom"
+              >
                 Get Started Free <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             </a>
@@ -421,7 +587,9 @@ export default function LandingPage() {
               </Button>
             </a>
           </div>
-          <p className="text-sm text-muted-foreground">No credit card required · Cancel anytime</p>
+          <p className="text-sm text-muted-foreground">
+            No credit card required · Cancel anytime
+          </p>
         </div>
       </section>
 
@@ -432,15 +600,34 @@ export default function LandingPage() {
             <div className="h-7 w-7 rounded-md bg-primary flex items-center justify-center">
               <Heart className="h-3.5 w-3.5 text-primary-foreground" />
             </div>
-            <span className="font-serif font-bold text-foreground">FormFlow</span>
+            <span className="font-serif font-bold text-foreground">
+              FormFlow
+            </span>
             <span>· Built for non-profits</span>
           </div>
           <div className="flex items-center gap-6">
-            <a href="/login" className="hover:text-foreground transition-colors">Sign In</a>
-            <a href="/signup" className="hover:text-foreground transition-colors">Sign Up</a>
-            <a href="/feedback" className="hover:text-foreground transition-colors">Contact</a>
+            <a
+              href="/login"
+              className="hover:text-foreground transition-colors"
+            >
+              Sign In
+            </a>
+            <a
+              href="/signup"
+              className="hover:text-foreground transition-colors"
+            >
+              Sign Up
+            </a>
+            <a
+              href="/feedback"
+              className="hover:text-foreground transition-colors"
+            >
+              Contact
+            </a>
           </div>
-          <p>&copy; {new Date().getFullYear()} FormFlow. All rights reserved.</p>
+          <p>
+            &copy; {new Date().getFullYear()} FormFlow. All rights reserved.
+          </p>
         </div>
       </footer>
     </div>
