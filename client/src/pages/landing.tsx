@@ -212,7 +212,7 @@ export default function LandingPage() {
                 </div>
                 <div className="flex-1 mx-4 h-6 bg-background rounded-md flex items-center px-3">
                   <span className="text-xs text-muted-foreground">
-                    app.HumMotion.org/dashboard
+                    app.HumMotion.com/dashboard
                   </span>
                 </div>
               </div>
@@ -221,7 +221,7 @@ export default function LandingPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="font-serif font-bold text-lg">
-                      Good morning, Olive{" "}
+                      Good morning, Maria{" "}
                     </p>
                     <p className="text-sm text-muted-foreground">
                       Here's your organization's impact at a glance
