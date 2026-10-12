@@ -61,7 +61,7 @@ export default function MediaPage() {
   const loadItems = async () => {
     if (!user) return;
     setIsLoading(true);
-    const { data } = await supabase.from("media_items").select("*").eq("user_id", user.id).order("created_at", { ascending: false });
+    const { data } = await supabase.from("media_items").select("*").order("created_at", { ascending: false });
     setItems(data ?? []);
     setIsLoading(false);
   };

@@ -653,7 +653,6 @@ export default function VolunteerHoursPage() {
         .from("volunteer_hours")
         .delete()
         .eq("id", pendingDelete.id)
-        .eq("user_id", user.id);
       if (deleteError) throw deleteError;
       toast({ title: "Entry deleted" });
       setPendingDelete(null);

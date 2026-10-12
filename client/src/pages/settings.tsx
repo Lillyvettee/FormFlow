@@ -280,7 +280,6 @@ export default function SettingsPage() {
       const { data, error } = await supabase
         .from("organization_settings")
         .select("*")
-        .eq("user_id", user.id)
         .maybeSingle();
       if (cancelled) return;
 

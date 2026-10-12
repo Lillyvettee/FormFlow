@@ -726,7 +726,6 @@ export default function FormsPage() {
     const { data, error } = await supabase
       .from("forms")
       .select("*")
-      .eq("user_id", user.id)
       .eq("is_archived", false)
       .order("created_at", { ascending: false });
 
@@ -823,8 +822,7 @@ export default function FormsPage() {
       const { error } = await supabase
         .from("forms")
         .update({ is_archived: true, is_published: false })
-        .eq("id", pendingArchive.id)
-        .eq("user_id", user.id);
+        .eq("id", pendingArchive.id);
 
       if (error) {
         toast({ title: "Could not delete form", description: error.message, variant: "destructive" });
@@ -838,8 +836,7 @@ export default function FormsPage() {
           supabase
             .from("forms")
             .update({ settings: { ...getSettings(f), followUpFormId: null } })
-            .eq("id", f.id)
-            .eq("user_id", user.id),
+            .eq("id", f.id),
         ),
       );
 
