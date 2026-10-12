@@ -1,19 +1,27 @@
 /**
  * SettingsPage
  *
- * Account settings for the signed-in user, in five sections:
- *   1. Profile    full name and organization, stored in Supabase Auth user metadata
+ * Settings for the signed-in user and their organization, in five sections:
+ *   1. Profile    the user's full name (Supabase Auth user metadata)
  *   2. Password   change password, after confirming the current one
- *   3. Branding   organization name, logo and theme color, stored in the
- *                 "organization_settings" table (one row per user)
+ *   3. Branding   the organization's logo and theme color, stored in
+ *                 "organization_settings" (one row per organization).
+ *                 Everyone can see it; only owners and admins can change it.
  *   4. Plan       pricing overview
- *   5. Account    email and sign out
+ *   5. Account    email, organization, role and sign out
  *
- * Backend assumptions:
- *   - organization_settings has a UNIQUE constraint on user_id. The branding
- *     upsert relies on it (see saveBranding). If it is missing, add it with:
- *       alter table organization_settings add constraint organization_settings_user_id_key unique (user_id);
- *   - Row Level Security restricts organization_settings rows to their owner.
+ * Team accounts:
+ *   The organization NAME has one home: the organizations table, edited on
+ *   the Team page. This page shows it but no longer stores its own copy.
+ *   Before team accounts, the name was kept in three places (profile,
+ *   branding and team), which could disagree.
+ *
+ * Backend assumptions (from team-accounts-migration.sql):
+ *   - organization_settings has a unique index on organization_id, which the
+ *     branding upsert relies on.
+ *   - Security rules let members read branding and only owners/admins write it.
+ *   - Optional: the update_my_display_name function (see the comment on
+ *     saveProfile) keeps your name on the Team page in sync.
  */
 
 import { useState, useEffect } from "react";
@@ -25,6 +33,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { useOrganization, ROLE_LABELS } from "@/hooks/use-organization";
 import { supabase } from "@/lib/supabase";
 import {
   Settings,
@@ -38,6 +47,7 @@ import {
   EyeOff,
   AlertCircle,
   ImageOff,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 
@@ -62,12 +72,18 @@ const DEFAULT_COLOR = THEME_COLORS[0].value;
 /** Accepts "#1a56db" style hex colors only. */
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
 
-/** Password rules, shown as a live checklist under the field. */
+/**
+ * Password rules, shown as a live checklist under the field.
+ * Kept identical to the rules on the Signup page, so a password that is
+ * accepted at sign-up is also accepted here (and vice versa). The special
+ * character rule was missing here before.
+ */
 const PASSWORD_RULES: { label: string; test: (pw: string) => boolean }[] = [
   { label: "At least 8 characters", test: (pw) => pw.length >= 8 },
   { label: "An uppercase letter", test: (pw) => /[A-Z]/.test(pw) },
   { label: "A lowercase letter", test: (pw) => /[a-z]/.test(pw) },
   { label: "A number", test: (pw) => /\d/.test(pw) },
+  { label: "A special character, like ! # or ?", test: (pw) => /[^A-Za-z0-9]/.test(pw) },
 ];
 
 /** Pricing shown in the Plan section. Kept as data so prices live in one place. */
@@ -201,19 +217,18 @@ function PasswordInput({
 export default function SettingsPage() {
   const { toast } = useToast();
   const { user, logout } = useAuth();
+  const { organization, role, isAdmin } = useOrganization();
 
   // ----- Profile -----
   const [fullName, setFullName] = useState("");
-  const [profileOrg, setProfileOrg] = useState("");
-  /** Last saved values, used to tell whether there are unsaved changes. */
-  const [savedProfile, setSavedProfile] = useState({ fullName: "", profileOrg: "" });
+  /** Last saved name, used to tell whether there are unsaved changes. */
+  const [savedFullName, setSavedFullName] = useState("");
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
-  // ----- Branding -----
-  const [companyName, setCompanyName] = useState("");
+  // ----- Branding (the organization's; the name lives on the Team page) -----
   const [primaryColor, setPrimaryColor] = useState(DEFAULT_COLOR);
   const [logoUrl, setLogoUrl] = useState("");
-  const [savedBranding, setSavedBranding] = useState({ companyName: "", primaryColor: DEFAULT_COLOR, logoUrl: "" });
+  const [savedBranding, setSavedBranding] = useState({ primaryColor: DEFAULT_COLOR, logoUrl: "" });
   const [brandingLoading, setBrandingLoading] = useState(true);
   const [brandingLoadError, setBrandingLoadError] = useState("");
   const [isSavingBranding, setIsSavingBranding] = useState(false);
@@ -245,10 +260,8 @@ export default function SettingsPage() {
   useEffect(() => {
     if (!user) return;
     const name = user.user_metadata?.full_name ?? "";
-    const org = user.user_metadata?.organization_name ?? "";
     setFullName(name);
-    setProfileOrg(org);
-    setSavedProfile({ fullName: name, profileOrg: org });
+    setSavedFullName(name);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
@@ -257,18 +270,15 @@ export default function SettingsPage() {
   // -------------------------------------------------------------------------
 
   /**
-   * Load the organization_settings row.
+   * Load the organization's branding row.
    *
-   * Fixes over the original:
-   * - .single() returns an error when no row exists yet (every new user).
-   *   .maybeSingle() returns null instead, which is the expected case.
-   * - Real errors were ignored; they now show in the card.
-   * - With no user, the skeleton never went away.
-   * - If the organization name has never been set, it is pre-filled from
-   *   the profile so the user does not have to type it twice.
+   * Filtered by organization_id so the query is explicit (security rules also
+   * limit it to the user's organization). maybeSingle() returns null when no
+   * branding has been saved yet, which is normal for a new organization.
+   * Reloads if the organization changes (for example after joining a team).
    */
   useEffect(() => {
-    if (!user) {
+    if (!organization) {
       setBrandingLoading(false);
       return;
     }
@@ -277,40 +287,39 @@ export default function SettingsPage() {
     const loadSettings = async () => {
       setBrandingLoading(true);
       setBrandingLoadError("");
-      const { data, error } = await supabase
-        .from("organization_settings")
-        .select("*")
-        .maybeSingle();
-      if (cancelled) return;
+      try {
+        const { data, error } = await supabase
+          .from("organization_settings")
+          .select("primary_color, logo_url")
+          .eq("organization_id", organization.id)
+          .maybeSingle();
+        if (cancelled) return;
+        if (error) throw error;
 
-      if (error) {
-        setBrandingLoadError(error.message);
-      } else {
         const loaded = {
-          companyName: data?.organization_name ?? user.user_metadata?.organization_name ?? "",
-          primaryColor: data?.primary_color && HEX_COLOR_PATTERN.test(data.primary_color) ? data.primary_color : DEFAULT_COLOR,
+          primaryColor:
+            data?.primary_color && HEX_COLOR_PATTERN.test(data.primary_color) ? data.primary_color : DEFAULT_COLOR,
           logoUrl: data?.logo_url ?? "",
         };
-        setCompanyName(loaded.companyName);
         setPrimaryColor(loaded.primaryColor);
         setLogoUrl(loaded.logoUrl);
-        // Saved state reflects what is actually in the database, so a
-        // pre-filled name still counts as an unsaved change.
-        setSavedBranding({
-          companyName: data?.organization_name ?? "",
-          primaryColor: loaded.primaryColor,
-          logoUrl: loaded.logoUrl,
-        });
+        setSavedBranding(loaded);
+      } catch (err) {
+        if (!cancelled) {
+          setBrandingLoadError(
+            err && typeof err === "object" && "message" in err ? String((err as { message: string }).message) : "Unknown error",
+          );
+        }
+      } finally {
+        if (!cancelled) setBrandingLoading(false);
       }
-      setBrandingLoading(false);
     };
 
     loadSettings();
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+  }, [organization?.id]);
 
   // Reset the broken-image flag whenever the logo URL changes, so a fixed URL gets a fresh try.
   useEffect(() => setLogoBroken(false), [logoUrl]);
@@ -319,28 +328,44 @@ export default function SettingsPage() {
   // Save profile
   // -------------------------------------------------------------------------
 
-  const profileDirty = fullName.trim() !== savedProfile.fullName || profileOrg.trim() !== savedProfile.profileOrg;
+  const profileDirty = fullName.trim() !== savedFullName;
 
   /**
-   * Save name and organization to the auth user's metadata.
-   * Fixes: trims values, recovers from thrown network errors (try/finally),
-   * and the button is disabled when nothing has changed.
+   * Save the user's name.
+   *
+   * The name is stored in two places: the auth user's metadata (used across
+   * the app) and the user's row on the team list, which copies it when they
+   * join. The second update keeps the Team page from showing an old name.
+   * It needs this small function in Supabase (run once in the SQL Editor):
+   *
+   *   create or replace function public.update_my_display_name(p_name text)
+   *   returns void language sql security definer set search_path = public as $$
+   *     update organization_members set display_name = nullif(left(trim(p_name), 100), '')
+   *     where user_id = auth.uid();
+   *   $$;
+   *   revoke execute on function public.update_my_display_name(text) from public, anon;
+   *   grant execute on function public.update_my_display_name(text) to authenticated;
+   *
+   * If the function does not exist yet, the profile still saves; only the
+   * team list keeps the old name.
    */
   const saveProfile = async () => {
     if (!user || !fullName.trim() || isSavingProfile) return;
     setIsSavingProfile(true);
     try {
-      const next = { fullName: fullName.trim(), profileOrg: profileOrg.trim() };
-      const { error } = await supabase.auth.updateUser({
-        data: { full_name: next.fullName, organization_name: next.profileOrg || null },
-      });
+      const name = fullName.trim();
+      const { error } = await supabase.auth.updateUser({ data: { full_name: name } });
       if (error) {
         toast({ title: "Could not update profile", description: error.message, variant: "destructive" });
         return;
       }
-      setFullName(next.fullName);
-      setProfileOrg(next.profileOrg);
-      setSavedProfile(next);
+      // Keep the Team page in sync. Not critical, so failures are ignored.
+      await supabase.rpc("update_my_display_name", { p_name: name }).then(
+        () => undefined,
+        () => undefined,
+      );
+      setFullName(name);
+      setSavedFullName(name);
       toast({ title: "Profile updated" });
     } catch (err) {
       toast({
@@ -360,42 +385,41 @@ export default function SettingsPage() {
   const logoError = validateLogoUrl(logoUrl);
   const colorError = HEX_COLOR_PATTERN.test(primaryColor) ? null : "Enter a color like #1a56db.";
   const brandingDirty =
-    companyName.trim() !== savedBranding.companyName ||
-    primaryColor.toLowerCase() !== savedBranding.primaryColor.toLowerCase() ||
-    logoUrl.trim() !== savedBranding.logoUrl;
+    primaryColor.toLowerCase() !== savedBranding.primaryColor.toLowerCase() || logoUrl.trim() !== savedBranding.logoUrl;
 
   /**
-   * Insert or update the user's branding row.
+   * Insert or update the organization's branding row (one per organization).
    *
-   * Bug in the original: upsert() without onConflict matches on the primary
-   * key. The payload has no id, so every save inserted a NEW row. After the
-   * second save, the loader's .single() failed with "multiple rows" and the
-   * branding section stopped loading. onConflict: "user_id" updates the
-   * existing row instead (requires a unique constraint on user_id; see top).
+   * onConflict: "organization_id" updates the existing row instead of adding
+   * a new one each save. user_id records who last changed the branding.
+   * organization_name is written too, purely to keep that older column in
+   * step with the real name in the organizations table.
+   *
+   * Only owners and admins reach this (the form is read-only for others),
+   * and the database rejects anyone else regardless.
    */
   const saveBranding = async () => {
-    if (!user || logoError || colorError || isSavingBranding) return;
+    if (!user || !organization || !isAdmin || logoError || colorError || isSavingBranding) return;
     setIsSavingBranding(true);
     try {
       const next = {
-        companyName: companyName.trim(),
         primaryColor: primaryColor.toLowerCase(),
         logoUrl: logoUrl.trim(),
       };
       const { error } = await supabase.from("organization_settings").upsert(
         {
+          organization_id: organization.id,
           user_id: user.id,
-          organization_name: next.companyName || null,
+          organization_name: organization.name,
           primary_color: next.primaryColor,
           logo_url: next.logoUrl || null,
         },
-        { onConflict: "user_id" },
+        { onConflict: "organization_id" },
       );
       if (error) {
         toast({ title: "Could not save branding", description: error.message, variant: "destructive" });
         return;
       }
-      setCompanyName(next.companyName);
       setLogoUrl(next.logoUrl);
       setSavedBranding(next);
       toast({ title: "Branding saved" });
@@ -506,7 +530,7 @@ export default function SettingsPage() {
         <h1 className="text-2xl font-serif font-bold" data-testid="text-settings-title">
           Settings
         </h1>
-        <p className="text-muted-foreground">Manage your account, branding, and plan</p>
+        <p className="text-muted-foreground">Manage your account, your organization's branding, and your plan</p>
       </div>
 
       {/* ===== Profile ===== */}
@@ -545,19 +569,6 @@ export default function SettingsPage() {
             <p id="profile-email-help" className="text-xs text-muted-foreground">
               Email cannot be changed
             </p>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="profile-org">
-              Organization <span className="text-muted-foreground font-normal">(optional)</span>
-            </Label>
-            <Input
-              id="profile-org"
-              value={profileOrg}
-              onChange={(e) => setProfileOrg(e.target.value)}
-              placeholder="Your non-profit name"
-              autoComplete="organization"
-              maxLength={150}
-            />
           </div>
           <Button
             type="submit"
@@ -678,6 +689,14 @@ export default function SettingsPage() {
           description="Customize how your organization appears on forms and reports"
         />
 
+        {/* Non-admins see the branding but cannot change it. */}
+        {!isAdmin && !brandingLoading && !brandingLoadError && (
+          <p className="mb-4 rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
+            Only owners and admins can change branding. Your role is{" "}
+            <span className="font-medium text-foreground">{role ? ROLE_LABELS[role] : "unknown"}</span>.
+          </p>
+        )}
+
         {brandingLoading ? (
           <div className="space-y-4" aria-busy="true">
             <Skeleton className="h-10 w-full" />
@@ -694,21 +713,20 @@ export default function SettingsPage() {
               saveBranding();
             }}
           >
-            {/* Organization name */}
-            <div className="space-y-2">
-              <Label htmlFor="branding-name">Organization name</Label>
-              <Input
-                id="branding-name"
-                placeholder="Your non-profit name"
-                value={companyName}
-                onChange={(e) => setCompanyName(e.target.value)}
-                maxLength={150}
-                aria-describedby="branding-name-help"
-                data-testid="input-company-name"
-              />
-              <p id="branding-name-help" className="text-xs text-muted-foreground">
-                Shown publicly on your forms and reports.
-              </p>
+            {/* A disabled fieldset makes every control inside read-only for non-admins. */}
+            <fieldset disabled={!isAdmin || isSavingBranding} className="space-y-5 disabled:opacity-90">
+            {/* Organization name: shown here, edited on the Team page (its one home). */}
+            <div className="space-y-1">
+              <p className="text-sm font-medium">Organization name</p>
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2">
+                <span data-testid="text-company-name">{organization?.name ?? "-"}</span>
+                {isAdmin && (
+                  <a href="/team" className="text-sm text-primary hover:underline">
+                    Change on Team page
+                  </a>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">Shown publicly on your forms and reports.</p>
             </div>
 
             {/* Logo URL with live preview */}
@@ -813,14 +831,18 @@ export default function SettingsPage() {
                 </div>
               )}
             </fieldset>
+            </fieldset>
 
-            <Button
-              type="submit"
-              disabled={!brandingDirty || Boolean(logoError) || Boolean(colorError) || isSavingBranding}
-              data-testid="button-save-settings"
-            >
-              {isSavingBranding ? "Saving..." : brandingDirty ? "Save branding" : "Saved"}
-            </Button>
+            {/* Save button only for those who can save. */}
+            {isAdmin && (
+              <Button
+                type="submit"
+                disabled={!brandingDirty || Boolean(logoError) || Boolean(colorError) || isSavingBranding}
+                data-testid="button-save-settings"
+              >
+                {isSavingBranding ? "Saving..." : brandingDirty ? "Save branding" : "Saved"}
+              </Button>
+            )}
           </form>
         )}
       </Card>
@@ -866,6 +888,14 @@ export default function SettingsPage() {
               {user?.email}
             </span>
           </div>
+          {/* Organization and role, with a link to manage the team. */}
+          <div className="flex items-center justify-between gap-4 py-2 border-b">
+            <span className="text-muted-foreground">Organization</span>
+            <span className="font-medium text-right">
+              {organization?.name ?? "-"}
+              {role && <span className="ml-2 text-xs font-normal text-muted-foreground">({ROLE_LABELS[role]})</span>}
+            </span>
+          </div>
           {user?.created_at && (
             <div className="flex items-center justify-between gap-4 py-2 border-b">
               <span className="text-muted-foreground">Member since</span>
@@ -874,7 +904,12 @@ export default function SettingsPage() {
               </span>
             </div>
           )}
-          <div className="pt-3">
+          <div className="pt-3 flex flex-wrap gap-2">
+            <Button asChild variant="outline">
+              <a href="/team">
+                <Users className="mr-1 h-4 w-4" aria-hidden="true" /> Manage team
+              </a>
+            </Button>
             <Button variant="outline" onClick={handleSignOut} disabled={isSigningOut} data-testid="button-logout-settings">
               {isSigningOut ? "Signing out..." : "Sign out"}
             </Button>
