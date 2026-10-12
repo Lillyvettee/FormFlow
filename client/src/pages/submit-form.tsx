@@ -225,7 +225,7 @@ export default function SubmitFormPage() {
   return (
     <div className="p-6 max-w-2xl mx-auto space-y-6 min-h-screen">
       <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-        <Layers className="h-4 w-4" /><span>FormFlow</span>
+        <Layers className="h-4 w-4" /><span>HumMotion</span>
       </div>
       <div className="space-y-1">
         <h1 className="text-2xl font-serif font-bold" data-testid="text-submit-form-title">{form?.title}</h1>
