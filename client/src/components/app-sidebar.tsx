@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useLocation, Link } from "wouter";
-import { LayoutDashboard, FileText, BarChart3, LinkIcon, Package, Settings, LogOut, Heart, Image, MessageSquare, DollarSign, Clock } from "lucide-react";
+import { LayoutDashboard, FileText, BarChart3, LinkIcon, Package, Settings, LogOut, Image, MessageSquare, DollarSign, Clock } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useOrganization } from "@/hooks/use-organization";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { AppLogo } from "@/components/app-logo";
 import {
   Sidebar,
   SidebarContent,
@@ -41,7 +42,7 @@ export function AppSidebar() {
   const [location] = useLocation();
   const { user } = useAuth();
   const { organization, branding } = useOrganization();
-  // Fall back to the HumMotion mark if the logo link is broken.
+  // Fall back to the HumMotion logo if the organization's logo link is broken.
   const [logoFailed, setLogoFailed] = useState(false);
   useEffect(() => setLogoFailed(false), [branding.logoUrl]);
   const showLogo = Boolean(branding.logoUrl) && !logoFailed;
@@ -76,9 +77,7 @@ export function AppSidebar() {
               onError={() => setLogoFailed(true)}
             />
           ) : (
-            <div className="h-8 w-8 rounded-md bg-primary flex items-center justify-center shrink-0">
-              <Heart className="h-4 w-4 text-primary-foreground" aria-hidden="true" />
-            </div>
+            <AppLogo className="h-8 w-8" />
           )}
           <span className="font-semibold text-base tracking-tight truncate" data-testid="text-sidebar-title">
             {organization?.name || "HumMotion"}

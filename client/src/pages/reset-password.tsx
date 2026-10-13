@@ -25,9 +25,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { AppLogo } from "@/components/app-logo";
 import { supabase } from "@/lib/supabase";
 import { PASSWORD_RULES } from "@/lib/password-rules";
-import { Heart, AlertCircle, Check, X, Eye, EyeOff } from "lucide-react";
+import { AlertCircle, Check, X, Eye, EyeOff } from "lucide-react";
 
 /** Error details Supabase puts in the URL when a link is expired or invalid. */
 const linkErrorFromUrl = (): string | null => {
@@ -105,9 +106,7 @@ export default function ResetPasswordPage() {
 
       <div className="w-full max-w-md space-y-6">
         <div className="text-center space-y-2">
-          <div className="h-10 w-10 rounded-md bg-primary flex items-center justify-center mx-auto">
-            <Heart className="h-5 w-5 text-primary-foreground" aria-hidden="true" />
-          </div>
+          <AppLogo className="h-12 w-12 mx-auto" />
           <h1 className="text-2xl font-serif font-bold">Choose a new password</h1>
         </div>
 

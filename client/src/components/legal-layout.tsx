@@ -12,8 +12,8 @@
 
 import { useEffect } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { AppLogo } from "@/components/app-logo";
 import { LEGAL, LEGAL_DETAILS_COMPLETE, formatLegalDate } from "@/lib/legal";
-import { Heart } from "lucide-react";
 
 export const LEGAL_PAGES = [
   { href: "/terms", label: "Terms of Service" },
@@ -38,9 +38,7 @@ export function LegalLayout({ title, children }: { title: string; children: Reac
             href="/"
             className="flex items-center gap-2 rounded-md font-serif font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <span className="h-7 w-7 rounded-md bg-primary flex items-center justify-center shrink-0" aria-hidden="true">
-              <Heart className="h-3.5 w-3.5 text-primary-foreground" />
-            </span>
+            <AppLogo className="h-7 w-7" />
             {LEGAL.appName}
           </a>
           <ThemeToggle />

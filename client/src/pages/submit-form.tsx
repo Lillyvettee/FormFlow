@@ -30,13 +30,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AppLogo } from "@/components/app-logo";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { setBrandColor } from "@/lib/brand-color";
 import {
   CheckCircle2,
   FileText,
-  Layers,
   // Renamed so it does not shadow the browser's built-in Image constructor.
   Image as ImageIcon,
   Mic,
@@ -861,7 +861,7 @@ export default function SubmitFormPage() {
             onError={() => setLogoFailed(true)}
           />
         ) : (
-          <Layers className="h-4 w-4" aria-hidden="true" />
+          <AppLogo className="h-6 w-6" />
         )}
         <span>{branding?.organization_name || APP_NAME}</span>
       </div>

@@ -21,6 +21,7 @@ import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { AppLogo } from "@/components/app-logo";
 import { useAuth } from "@/hooks/use-auth";
 import {
   BarChart3,
@@ -226,15 +227,9 @@ const NAV_LINKS = [
 // Small presentational components
 // ===========================================================================
 
-/** Logo mark: heart icon on a primary-colored square. Decorative. */
+/** Logo mark: the hummingbird (see AppLogo). Decorative. */
 function LogoMark({ size = "md" }: { size?: "sm" | "md" | "lg" }) {
-  const box = { sm: "h-7 w-7 rounded-md", md: "h-8 w-8 rounded-md", lg: "h-16 w-16 rounded-2xl" }[size];
-  const icon = { sm: "h-3.5 w-3.5", md: "h-4 w-4", lg: "h-8 w-8" }[size];
-  return (
-    <div className={`${box} bg-primary flex items-center justify-center shrink-0`} aria-hidden="true">
-      <Heart className={`${icon} text-primary-foreground`} />
-    </div>
-  );
+  return <AppLogo className={{ sm: "h-7 w-7", md: "h-9 w-9", lg: "h-20 w-20" }[size]} />;
 }
 
 /** Small label above a section heading. */

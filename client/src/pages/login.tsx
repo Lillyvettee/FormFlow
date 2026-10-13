@@ -22,8 +22,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { AppLogo } from "@/components/app-logo";
 import { supabase } from "@/lib/supabase";
-import { Heart, ArrowRight, Eye, EyeOff, AlertCircle, CheckCircle2 } from "lucide-react";
+import { ArrowRight, Eye, EyeOff, AlertCircle, CheckCircle2 } from "lucide-react";
 
 // ===========================================================================
 // Helpers
@@ -241,10 +242,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md space-y-6">
         {/* ===== Logo and heading ===== */}
         <div className="text-center space-y-2">
-          <div className="h-10 w-10 rounded-md bg-primary flex items-center justify-center mx-auto">
-            {/* Decorative logo mark; hidden from screen readers. */}
-            <Heart className="h-5 w-5 text-primary-foreground" aria-hidden="true" />
-          </div>
+          <AppLogo className="h-12 w-12 mx-auto" />
           <h1 className="text-2xl font-serif font-bold" data-testid="text-login-title">
             Welcome back
           </h1>

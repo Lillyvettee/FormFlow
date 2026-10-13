@@ -30,7 +30,8 @@ import { Label } from "@/components/ui/label";
 import { supabase } from "@/lib/supabase";
 import { PASSWORD_RULES } from "@/lib/password-rules";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Heart, ArrowRight, Check, X, Eye, EyeOff, AlertCircle, Mail } from "lucide-react";
+import { AppLogo } from "@/components/app-logo";
+import { ArrowRight, Check, X, Eye, EyeOff, AlertCircle, Mail } from "lucide-react";
 
 // ===========================================================================
 // Constants and helpers
@@ -91,11 +92,7 @@ const friendlySignupError = (err: { message?: string; status?: number }): string
 
 /** Logo mark; decorative, so hidden from screen readers. */
 function LogoMark() {
-  return (
-    <div className="h-10 w-10 rounded-md bg-primary flex items-center justify-center mx-auto" aria-hidden="true">
-      <Heart className="h-5 w-5 text-primary-foreground" />
-    </div>
-  );
+  return <AppLogo className="h-12 w-12 mx-auto" />;
 }
 
 /** Red error banner. role="alert" makes screen readers announce it immediately. */
