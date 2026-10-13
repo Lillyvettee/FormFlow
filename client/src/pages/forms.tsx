@@ -14,9 +14,10 @@
  * Backend assumptions (Supabase table "forms"):
  *   - Columns: id, user_id, title, description, fields (json), settings (json),
  *     is_published, is_archived, response_count, created_at.
- *   - Row Level Security lets owners read/write their own rows, and lets
- *     anyone read rows where is_published = true (for the public submit page).
- *     The .eq("user_id", ...) filters below are a second line of defense.
+ *   - Forms belong to the organization. Row Level Security shares them with
+ *     every member (viewers read only) and lets anyone read rows where
+ *     is_published = true (for the public submit page). user_id records who
+ *     created the form; it isn't used for access.
  */
 
 import { useState, useEffect, useCallback, useMemo } from "react";
@@ -33,6 +34,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
+import { useOrganization } from "@/hooks/use-organization";
+import { ReadOnlyNotice } from "@/components/read-only-notice";
+import { friendlyWriteError } from "@/lib/db-errors";
 import { Link } from "wouter";
 import {
   Plus,
@@ -348,7 +352,7 @@ function FormBuilder({
    * - Trims all text before saving, and drops options from non-dropdown fields.
    * - try/finally so the Saving state always clears, even if the request throws.
    * - Refuses to save without a user id instead of writing user_id "".
-   * - Update is filtered by user_id as well as id.
+   * - Editing keeps the original creator: user_id is only set on new forms.
    */
   const handleSave = async () => {
     setShowErrors(true);
@@ -376,15 +380,14 @@ function FormBuilder({
         fields: cleanFields,
         is_published: isPublished,
         settings,
-        user_id: userId,
       };
 
       const { error } = form
-        ? await supabase.from("forms").update(payload).eq("id", form.id).eq("user_id", userId)
-        : await supabase.from("forms").insert(payload);
+        ? await supabase.from("forms").update(payload).eq("id", form.id)
+        : await supabase.from("forms").insert({ ...payload, user_id: userId });
 
       if (error) {
-        toast({ title: "Could not save form", description: error.message, variant: "destructive" });
+        toast({ title: "Could not save form", description: friendlyWriteError(error), variant: "destructive" });
         return;
       }
 
@@ -684,6 +687,8 @@ function FormBuilder({
 export default function FormsPage() {
   const { user } = useAuth();
   const { toast } = useToast();
+  /** False for viewers and read-only organizations; hides every create/edit/delete control. */
+  const { canEdit } = useOrganization();
 
   // ----- Data state -----
   const [forms, setForms] = useState<Form[]>([]);
@@ -793,7 +798,7 @@ export default function FormsPage() {
       });
 
       if (error) {
-        toast({ title: "Could not duplicate form", description: error.message, variant: "destructive" });
+        toast({ title: "Could not duplicate form", description: friendlyWriteError(error), variant: "destructive" });
         return;
       }
       toast({ title: "Form duplicated" });
@@ -825,13 +830,14 @@ export default function FormsPage() {
         .eq("id", pendingArchive.id);
 
       if (error) {
-        toast({ title: "Could not delete form", description: error.message, variant: "destructive" });
+        toast({ title: "Could not delete form", description: friendlyWriteError(error), variant: "destructive" });
         return;
       }
 
       // Unlink forms that used the archived form as their follow-up.
+      // The archive already succeeded, so a failure here is reported but not fatal.
       const linkedForms = forms.filter((f) => getSettings(f).followUpFormId === pendingArchive.id);
-      await Promise.all(
+      const unlinkResults = await Promise.all(
         linkedForms.map((f) =>
           supabase
             .from("forms")
@@ -839,6 +845,14 @@ export default function FormsPage() {
             .eq("id", f.id),
         ),
       );
+      const unlinkError = unlinkResults.find((r) => r.error)?.error;
+      if (unlinkError) {
+        toast({
+          title: "Could not unlink follow-up forms",
+          description: friendlyWriteError(unlinkError),
+          variant: "destructive",
+        });
+      }
 
       toast({ title: "Form deleted" });
       setPendingArchive(null);
@@ -864,7 +878,8 @@ export default function FormsPage() {
   // Render: builder view
   // -------------------------------------------------------------------------
 
-  if (showBuilder || editingForm) {
+  // The builder is only reachable when the user can edit.
+  if (canEdit && (showBuilder || editingForm)) {
     return (
       <div className="p-6 max-w-4xl mx-auto">
         <h1 className="text-2xl font-serif font-bold mb-6" data-testid="text-form-builder-title">
@@ -897,10 +912,14 @@ export default function FormsPage() {
           </h1>
           <p className="text-muted-foreground">Create volunteer sign-ups, donation forms, surveys, and more</p>
         </div>
-        <Button onClick={() => setShowBuilder(true)} data-testid="button-create-form">
-          <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> New form
-        </Button>
+        {canEdit && (
+          <Button onClick={() => setShowBuilder(true)} data-testid="button-create-form">
+            <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> New form
+          </Button>
+        )}
       </div>
+
+      <ReadOnlyNotice />
 
       {/* ===== Form cards (or loading / empty states) ===== */}
       {isLoading ? (
@@ -962,14 +981,16 @@ export default function FormsPage() {
 
                 {/* Actions. mt-auto pins this row to the bottom so cards line up. */}
                 <div className="flex items-center gap-1.5 pt-1 border-t flex-wrap mt-auto">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setEditingForm(form)}
-                    data-testid={`button-edit-form-${form.id}`}
-                  >
-                    <Pencil className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> Edit
-                  </Button>
+                  {canEdit && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setEditingForm(form)}
+                      data-testid={`button-edit-form-${form.id}`}
+                    >
+                      <Pencil className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> Edit
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="sm"
@@ -997,25 +1018,29 @@ export default function FormsPage() {
                   >
                     <Link2 className="h-3.5 w-3.5" aria-hidden="true" />
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleDuplicate(form)}
-                    disabled={duplicatingId === form.id}
-                    aria-label={`Duplicate ${form.title}`}
-                    title="Duplicate"
-                  >
-                    <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setPendingArchive(form)}
-                    aria-label={`Delete ${form.title}`}
-                    title="Delete"
-                  >
-                    <Trash2 className="h-3.5 w-3.5 text-destructive" aria-hidden="true" />
-                  </Button>
+                  {canEdit && (
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDuplicate(form)}
+                        disabled={duplicatingId === form.id}
+                        aria-label={`Duplicate ${form.title}`}
+                        title="Duplicate"
+                      >
+                        <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setPendingArchive(form)}
+                        aria-label={`Delete ${form.title}`}
+                        title="Delete"
+                      >
+                        <Trash2 className="h-3.5 w-3.5 text-destructive" aria-hidden="true" />
+                      </Button>
+                    </>
+                  )}
                 </div>
               </Card>
             );
@@ -1029,13 +1054,17 @@ export default function FormsPage() {
           </div>
           <div className="space-y-1.5">
             <h3 className="font-semibold text-lg">No forms yet</h3>
-            <p className="text-sm text-muted-foreground max-w-sm mx-auto">
-              Create your first form to collect volunteer information, event registrations, or community feedback.
-            </p>
+            {canEdit && (
+              <p className="text-sm text-muted-foreground max-w-sm mx-auto">
+                Create your first form to collect volunteer information, event registrations, or community feedback.
+              </p>
+            )}
           </div>
-          <Button onClick={() => setShowBuilder(true)} data-testid="button-create-first-form">
-            <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Create first form
-          </Button>
+          {canEdit && (
+            <Button onClick={() => setShowBuilder(true)} data-testid="button-create-first-form">
+              <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Create first form
+            </Button>
+          )}
         </div>
       )}
 
@@ -1133,7 +1162,7 @@ export default function FormsPage() {
 
       {/* ===== Delete (archive) confirmation dialog ===== */}
       <Dialog
-        open={pendingArchive !== null}
+        open={canEdit && pendingArchive !== null}
         onOpenChange={(open) => {
           if (!open && !isArchiving) setPendingArchive(null);
         }}

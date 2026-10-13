@@ -10,12 +10,15 @@
  *   - Per-item low-stock threshold, with an alert banner for low and empty items
  *   - Search and stock-status filter
  *   - Add/edit dialog and a delete confirmation dialog
+ *   - Read-only mode (viewers, or an ended trial): add, edit, delete and
+ *     quantity buttons are hidden; viewing, search and filters still work
  *
  * Backend assumptions:
  *   - Columns: id, user_id, name, description, quantity (integer), unit,
  *     category, condition, location, notes, low_stock_threshold (integer).
- *   - Row Level Security restricts every row to its owner. The extra
- *     .eq("user_id", ...) filters below are a second line of defense.
+ *   - Row Level Security limits rows to the user's organization and blocks
+ *     changes from viewers. user_id records who added the item; it isn't
+ *     used for access.
  */
 
 import { useState, useEffect, useCallback, useMemo } from "react";
@@ -32,6 +35,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
+import { useOrganization } from "@/hooks/use-organization";
+import { ReadOnlyNotice } from "@/components/read-only-notice";
+import { friendlyWriteError } from "@/lib/db-errors";
 import {
   Plus,
   Package,
@@ -175,6 +181,7 @@ const loadSavedViewMode = (): ViewMode => {
 
 export default function InventoryPage() {
   const { user } = useAuth();
+  const { canEdit } = useOrganization();
   const { toast } = useToast();
 
   // ----- Data state -----
@@ -235,7 +242,6 @@ export default function InventoryPage() {
     const { data, error } = await supabase
       .from("inventory_items")
       .select("*")
-      .eq("user_id", user.id)
       .order("name", { ascending: true });
 
     if (error) {
@@ -332,7 +338,7 @@ export default function InventoryPage() {
    * - Trims all text fields before saving.
    * - Validates quantity and threshold.
    * - try/finally so the Saving state always clears, even if the request throws.
-   * - Update is filtered by user_id as well as id.
+   * - Editing keeps the original creator: user_id is only set on new items.
    */
   const handleSave = async () => {
     if (!user || !isFormValid || isSaving) return;
@@ -349,15 +355,14 @@ export default function InventoryPage() {
         location: location.trim() || null,
         notes: notes.trim() || null,
         low_stock_threshold: Number(thresholdText),
-        user_id: user.id,
       };
 
       const { error } = editingItem
-        ? await supabase.from("inventory_items").update(payload).eq("id", editingItem.id).eq("user_id", user.id)
-        : await supabase.from("inventory_items").insert(payload);
+        ? await supabase.from("inventory_items").update(payload).eq("id", editingItem.id)
+        : await supabase.from("inventory_items").insert({ ...payload, user_id: user.id });
 
       if (error) {
-        toast({ title: "Could not save item", description: error.message, variant: "destructive" });
+        toast({ title: "Could not save item", description: friendlyWriteError(error), variant: "destructive" });
         return;
       }
 
@@ -367,7 +372,7 @@ export default function InventoryPage() {
     } catch (err) {
       toast({
         title: "Could not save item",
-        description: err instanceof Error ? err.message : "Check your connection and try again.",
+        description: friendlyWriteError(err as { message?: string }, "Check your connection and try again."),
         variant: "destructive",
       });
     } finally {
@@ -392,11 +397,10 @@ export default function InventoryPage() {
       const { error } = await supabase
         .from("inventory_items")
         .delete()
-        .eq("id", pendingDelete.id)
-        .eq("user_id", user.id);
+        .eq("id", pendingDelete.id);
 
       if (error) {
-        toast({ title: "Could not delete item", description: error.message, variant: "destructive" });
+        toast({ title: "Could not delete item", description: friendlyWriteError(error), variant: "destructive" });
         return;
       }
 
@@ -406,7 +410,7 @@ export default function InventoryPage() {
     } catch (err) {
       toast({
         title: "Could not delete item",
-        description: err instanceof Error ? err.message : "Check your connection and try again.",
+        description: friendlyWriteError(err as { message?: string }, "Check your connection and try again."),
         variant: "destructive",
       });
     } finally {
@@ -450,12 +454,11 @@ export default function InventoryPage() {
       const { error } = await supabase
         .from("inventory_items")
         .update({ quantity: newQty })
-        .eq("id", item.id)
-        .eq("user_id", user.id);
+        .eq("id", item.id);
 
       if (error) {
         applyQty(oldQty); // Roll back.
-        toast({ title: "Could not update quantity", description: error.message, variant: "destructive" });
+        toast({ title: "Could not update quantity", description: friendlyWriteError(error), variant: "destructive" });
         return;
       }
 
@@ -475,7 +478,7 @@ export default function InventoryPage() {
       applyQty(oldQty); // Roll back.
       toast({
         title: "Could not update quantity",
-        description: err instanceof Error ? err.message : "Check your connection and try again.",
+        description: friendlyWriteError(err as { message?: string }, "Check your connection and try again."),
         variant: "destructive",
       });
     } finally {
@@ -578,15 +581,18 @@ export default function InventoryPage() {
               </Button>
             ))}
           </div>
-          <Button onClick={openCreate}>
-            <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Add item
-          </Button>
+          {canEdit && (
+            <Button onClick={openCreate}>
+              <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Add item
+            </Button>
+          )}
         </div>
       </div>
+      <ReadOnlyNotice />
 
       {/* ===== Stock alerts banner =====
           Each badge is clickable and opens that item for editing, so restocking
-          is one click away. */}
+          is one click away. In read-only mode the badges are plain labels. */}
       {!isLoading && restockItems.length > 0 && (
         <Card className="p-4 border-destructive/50 bg-destructive/5">
           <div className="flex items-center gap-2 mb-2">
@@ -598,6 +604,14 @@ export default function InventoryPage() {
           <div className="flex flex-wrap gap-2">
             {restockItems.map((item) => {
               const status = getStockStatus(item);
+              const text = `${item.name}: ${isOutOfStock(item) ? "out of stock" : `${formatQty(getQty(item), item.unit)} left`}`;
+              if (!canEdit) {
+                return (
+                  <Badge key={item.id} variant={status.variant} className={`text-xs ${status.className ?? ""}`}>
+                    {text}
+                  </Badge>
+                );
+              }
               return (
                 <button
                   key={item.id}
@@ -607,7 +621,7 @@ export default function InventoryPage() {
                   aria-label={`Edit ${item.name}`}
                 >
                   <Badge variant={status.variant} className={`text-xs cursor-pointer ${status.className ?? ""}`}>
-                    {item.name}: {isOutOfStock(item) ? "out of stock" : `${formatQty(getQty(item), item.unit)} left`}
+                    {text}
                   </Badge>
                 </button>
               );
@@ -669,12 +683,14 @@ export default function InventoryPage() {
           <div className="space-y-1.5">
             <h3 className="font-semibold text-lg">No inventory items</h3>
             <p className="text-sm text-muted-foreground max-w-sm mx-auto">
-              Add items to track quantities and conditions.
+              {canEdit ? "Add items to track quantities and conditions." : "Items will appear here once they are added."}
             </p>
           </div>
-          <Button onClick={openCreate}>
-            <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Add first item
-          </Button>
+          {canEdit && (
+            <Button onClick={openCreate}>
+              <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Add first item
+            </Button>
+          )}
         </div>
       ) : filteredItems.length === 0 ? (
         // Items exist, but the search or filter hides all of them.
@@ -721,32 +737,38 @@ export default function InventoryPage() {
                       </Badge>
                     </div>
 
-                    {/* Quantity with +/- buttons. aria-live announces the new number. */}
-                    <div className="flex items-center justify-between gap-3 mb-3 p-3 rounded-md bg-muted/50">
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-8 w-8 shrink-0"
-                        onClick={() => adjustQuantity(item, -1)}
-                        disabled={qty === 0 || isUpdating}
-                        aria-label={`Remove one ${item.name}`}
-                      >
-                        <Minus className="h-3.5 w-3.5" aria-hidden="true" />
-                      </Button>
+                    {/* Quantity with +/- buttons (just the number when read-only). aria-live announces the new number. */}
+                    <div
+                      className={`flex items-center gap-3 mb-3 p-3 rounded-md bg-muted/50 ${canEdit ? "justify-between" : "justify-center"}`}
+                    >
+                      {canEdit && (
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8 shrink-0"
+                          onClick={() => adjustQuantity(item, -1)}
+                          disabled={qty === 0 || isUpdating}
+                          aria-label={`Remove one ${item.name}`}
+                        >
+                          <Minus className="h-3.5 w-3.5" aria-hidden="true" />
+                        </Button>
+                      )}
                       <div className="text-center" aria-live="polite">
                         <p className={`text-2xl font-bold ${isLow ? "text-destructive" : ""}`}>{qty}</p>
                         <p className="text-xs text-muted-foreground">{item.unit?.trim() || "units"}</p>
                       </div>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-8 w-8 shrink-0"
-                        onClick={() => adjustQuantity(item, 1)}
-                        disabled={isUpdating}
-                        aria-label={`Add one ${item.name}`}
-                      >
-                        <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                      </Button>
+                      {canEdit && (
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-8 w-8 shrink-0"
+                          onClick={() => adjustQuantity(item, 1)}
+                          disabled={isUpdating}
+                          aria-label={`Add one ${item.name}`}
+                        >
+                          <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                        </Button>
+                      )}
                     </div>
 
                     {/* Stock level bar, relative to the item's own threshold (see getStockPercent). */}
@@ -783,21 +805,23 @@ export default function InventoryPage() {
                     </div>
 
                     {/* Actions, pinned to the bottom so cards line up */}
-                    <div className="flex items-center gap-1 pt-3 border-t mt-auto">
-                      <Button variant="ghost" size="sm" onClick={() => openEdit(item)}>
-                        <Pencil className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> Edit
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setPendingDelete(item)}
-                        className="ml-auto"
-                        aria-label={`Delete ${item.name}`}
-                        title="Delete"
-                      >
-                        <Trash2 className="h-3.5 w-3.5 text-destructive" aria-hidden="true" />
-                      </Button>
-                    </div>
+                    {canEdit && (
+                      <div className="flex items-center gap-1 pt-3 border-t mt-auto">
+                        <Button variant="ghost" size="sm" onClick={() => openEdit(item)}>
+                          <Pencil className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setPendingDelete(item)}
+                          className="ml-auto"
+                          aria-label={`Delete ${item.name}`}
+                          title="Delete"
+                        >
+                          <Trash2 className="h-3.5 w-3.5 text-destructive" aria-hidden="true" />
+                        </Button>
+                      </div>
+                    )}
                   </Card>
                 );
               })}
@@ -816,7 +840,7 @@ export default function InventoryPage() {
                     <TableHead>Category</TableHead>
                     <TableHead>Location</TableHead>
                     <TableHead>Condition</TableHead>
-                    <TableHead className="w-20">Actions</TableHead>
+                    {canEdit && <TableHead className="w-20">Actions</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -836,16 +860,18 @@ export default function InventoryPage() {
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center justify-center gap-2">
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              className="h-7 w-7"
-                              onClick={() => adjustQuantity(item, -1)}
-                              disabled={qty === 0 || isUpdating}
-                              aria-label={`Remove one ${item.name}`}
-                            >
-                              <Minus className="h-3 w-3" aria-hidden="true" />
-                            </Button>
+                            {canEdit && (
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-7 w-7"
+                                onClick={() => adjustQuantity(item, -1)}
+                                disabled={qty === 0 || isUpdating}
+                                aria-label={`Remove one ${item.name}`}
+                              >
+                                <Minus className="h-3 w-3" aria-hidden="true" />
+                              </Button>
+                            )}
                             {/* min-w instead of fixed w so 4+ digit quantities do not overflow. */}
                             <span
                               className={`font-bold min-w-8 px-1 text-center tabular-nums ${isLow ? "text-destructive" : ""}`}
@@ -853,41 +879,45 @@ export default function InventoryPage() {
                             >
                               {qty}
                             </span>
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              className="h-7 w-7"
-                              onClick={() => adjustQuantity(item, 1)}
-                              disabled={isUpdating}
-                              aria-label={`Add one ${item.name}`}
-                            >
-                              <Plus className="h-3 w-3" aria-hidden="true" />
-                            </Button>
+                            {canEdit && (
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-7 w-7"
+                                onClick={() => adjustQuantity(item, 1)}
+                                disabled={isUpdating}
+                                aria-label={`Add one ${item.name}`}
+                              >
+                                <Plus className="h-3 w-3" aria-hidden="true" />
+                              </Button>
+                            )}
                           </div>
                         </TableCell>
                         <TableCell>{item.category ?? "-"}</TableCell>
                         <TableCell>{item.location ?? "-"}</TableCell>
                         <TableCell>{item.condition ? renderConditionBadge(item.condition) : "-"}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => openEdit(item)}
-                              aria-label={`Edit ${item.name}`}
-                            >
-                              <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => setPendingDelete(item)}
-                              aria-label={`Delete ${item.name}`}
-                            >
-                              <Trash2 className="h-3.5 w-3.5 text-destructive" aria-hidden="true" />
-                            </Button>
-                          </div>
-                        </TableCell>
+                        {canEdit && (
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => openEdit(item)}
+                                aria-label={`Edit ${item.name}`}
+                              >
+                                <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => setPendingDelete(item)}
+                                aria-label={`Delete ${item.name}`}
+                              >
+                                <Trash2 className="h-3.5 w-3.5 text-destructive" aria-hidden="true" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        )}
                       </TableRow>
                     );
                   })}
@@ -915,7 +945,7 @@ export default function InventoryPage() {
                         interval={0}
                       />
                       <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }} allowDecimals={false} />
-                      <Tooltip
+                      <Tooltip<number, string>
                         contentStyle={{
                           backgroundColor: "hsl(var(--popover))",
                           border: "1px solid hsl(var(--border))",

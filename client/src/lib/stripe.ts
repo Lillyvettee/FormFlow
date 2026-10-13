@@ -39,30 +39,39 @@ export function isFeatureAvailable(plan: Plan, feature: 'customBranding' | 'file
 
 // ============================================================
 // STRIPE CHECKOUT
-// Calls a Supabase Edge Function to create a Stripe Checkout session
-// Deploy the edge function from: supabase/functions/create-checkout/
+// Calls the Supabase Edge Functions in supabase/functions/
+// (create-checkout, create-portal). Billing belongs to the organization;
+// only owners and admins can use these.
 // ============================================================
-export async function createCheckoutSession(plan: Plan, billingCycle: BillingCycle): Promise<{ url: string }> {
-  const { data, error } = await supabase.functions.invoke('create-checkout', {
-    body: { plan, billingCycle },
-  })
 
-  if (error) throw new Error(error.message)
-  if (!data?.url) throw new Error('No checkout URL returned')
+/** Paid plans. Starter is billed monthly, Mission yearly. */
+export type PaidPlan = 'starter' | 'mission'
+
+/**
+ * Calls an Edge Function and returns its { url }. Functions report problems
+ * as { error: "message" } with a non-2xx status; supabase-js hides that body
+ * behind a generic message, so it is read back out here.
+ */
+async function invokeForUrl(name: string, body: object): Promise<{ url: string }> {
+  const { data, error } = await supabase.functions.invoke(name, { body })
+
+  if (error) {
+    const message = await error.context?.json?.().then((b: { error?: string }) => b?.error).catch(() => null)
+    throw new Error(message || 'Billing is unavailable right now. Please try again.')
+  }
+  if (!data?.url) throw new Error('Billing is unavailable right now. Please try again.')
 
   return { url: data.url }
 }
 
-// Redirect to Stripe Billing Portal to manage/cancel subscription
-export async function createBillingPortalSession(): Promise<{ url: string }> {
-  const { data, error } = await supabase.functions.invoke('create-portal', {
-    body: {},
-  })
+/** Start Stripe Checkout. A demo discount code, if given, is checked on the server. */
+export function createCheckoutSession(plan: PaidPlan, discountCode?: string): Promise<{ url: string }> {
+  return invokeForUrl('create-checkout', { plan, discountCode: discountCode?.trim() || undefined })
+}
 
-  if (error) throw new Error(error.message)
-  if (!data?.url) throw new Error('No portal URL returned')
-
-  return { url: data.url }
+/** Stripe's billing portal: update card, invoices, switch plan, cancel. */
+export function createBillingPortalSession(): Promise<{ url: string }> {
+  return invokeForUrl('create-portal', {})
 }
 
 // ============================================================

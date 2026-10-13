@@ -1,0 +1,23 @@
+# Dependencies (Vercel installs them from package-lock.json)
+node_modules/
+
+# Build output
+client/dist/
+
+# macOS folder metadata
+.DS_Store
+
+# Local-only environment files. client/.env stays committed: it holds only
+# Supabase's public URL and publishable key, which the build needs.
+.env.local
+.env.*.local
+
+# Supabase CLI local state
+supabase/.temp/
+supabase/.branches/
+
+# Editor and OS clutter
+*.log
+.vscode/*
+!.vscode/extensions.json
+Thumbs.db

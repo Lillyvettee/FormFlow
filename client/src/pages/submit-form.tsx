@@ -32,6 +32,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
+import { setBrandColor } from "@/lib/brand-color";
 import {
   CheckCircle2,
   FileText,
@@ -480,6 +481,9 @@ export default function SubmitFormPage() {
 
   // ----- Data -----
   const [form, setForm] = useState<Form | null>(null);
+  /** The organization's name, logo and color (get_public_form_branding, migration 006). */
+  const [branding, setBranding] = useState<{ organization_name: string; primary_color: string | null; logo_url: string | null } | null>(null);
+  const [logoFailed, setLogoFailed] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
 
@@ -546,6 +550,27 @@ export default function SubmitFormPage() {
       cancelled = true;
     };
   }, [formId]);
+
+  /**
+   * Show the form in its organization's colors and logo. Branding is
+   * optional: if it can't load, the form still works in the default theme.
+   * The color is removed when leaving the page, restoring a signed-in
+   * member's own organization color.
+   */
+  useEffect(() => {
+    if (!form?.id) return;
+    let cancelled = false;
+    supabase.rpc("get_public_form_branding", { p_form_id: form.id }).then(({ data }) => {
+      const row = Array.isArray(data) ? data[0] : data;
+      if (cancelled || !row) return;
+      setBranding(row);
+      setBrandColor("page", row.primary_color);
+    });
+    return () => {
+      cancelled = true;
+      setBrandColor("page", null);
+    };
+  }, [form?.id]);
 
   // Show the form's title in the browser tab.
   useEffect(() => {
@@ -828,8 +853,17 @@ export default function SubmitFormPage() {
   return (
     <div className="p-6 max-w-2xl mx-auto space-y-6 min-h-screen">
       <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-        <Layers className="h-4 w-4" aria-hidden="true" />
-        <span>{APP_NAME}</span>
+        {branding?.logo_url && !logoFailed ? (
+          <img
+            src={branding.logo_url}
+            alt=""
+            className="h-8 w-8 rounded-md object-contain"
+            onError={() => setLogoFailed(true)}
+          />
+        ) : (
+          <Layers className="h-4 w-4" aria-hidden="true" />
+        )}
+        <span>{branding?.organization_name || APP_NAME}</span>
       </div>
 
       <div className="space-y-1">

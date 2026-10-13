@@ -28,30 +28,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/lib/supabase";
+import { PASSWORD_RULES } from "@/lib/password-rules";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Heart, ArrowRight, Check, X, Eye, EyeOff, AlertCircle, Mail } from "lucide-react";
 
 // ===========================================================================
 // Constants and helpers
 // ===========================================================================
-
-/**
- * Password rules, used for both the checklist and validation.
- *
- * The special character check now accepts any non-letter, non-digit
- * character. The original only accepted a fixed list, so passwords using
- * ~ ` or a space were wrongly rejected.
- *
- * Keep this list in sync with PASSWORD_RULES on the Settings page, so a
- * password allowed when changing it is also allowed here (and vice versa).
- */
-const PASSWORD_RULES: { label: string; test: (pw: string) => boolean }[] = [
-  { label: "At least 8 characters", test: (pw) => pw.length >= 8 },
-  { label: "Uppercase letter", test: (pw) => /[A-Z]/.test(pw) },
-  { label: "Lowercase letter", test: (pw) => /[a-z]/.test(pw) },
-  { label: "Number", test: (pw) => /\d/.test(pw) },
-  { label: "Special character, like ! # or ?", test: (pw) => /[^A-Za-z0-9]/.test(pw) },
-];
 
 /** Simple email format check: something@something.something, no spaces. */
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -575,6 +558,19 @@ export default function SignupPage() {
               {isLoading ? "Creating account..." : "Create account"}
               {!isLoading && <ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />}
             </Button>
+
+            {/* Legal links open in a new tab so a half-filled form isn't lost. */}
+            <p className="text-xs text-muted-foreground text-center">
+              By creating an account you agree to the{" "}
+              <a href="/terms" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">
+                Terms of Service
+              </a>{" "}
+              and{" "}
+              <a href="/privacy" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">
+                Privacy Policy
+              </a>
+              .
+            </p>
           </form>
         </Card>
 

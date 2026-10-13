@@ -11,6 +11,9 @@
  *     /login, /signup    shown to signed-out visitors and demo visitors;
  *                        signed-in users are sent to the dashboard instead
  *     /forgot-password
+ *     /reset-password    where password reset emails land
+ *     /terms, /privacy, /refunds   legal pages (linked from landing, signup
+ *                        and the Plan section)
  *
  *   Signed in (real account or demo):
  *     The sidebar layout, wrapped in OrganizationGate, so the app only appears
@@ -36,6 +39,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { OrganizationProvider } from "@/hooks/use-organization";
 import { OrganizationGate } from "@/components/organization-gate";
 import { DemoBanner } from "@/components/demo-banner";
+import { BillingBanner } from "@/components/billing-banner";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -52,12 +56,16 @@ import SubmitFormPage from "@/pages/submit-form";
 import SignupPage from "@/pages/signup";
 import LoginPage from "@/pages/login";
 import ForgotPasswordPage from "@/pages/forgot-password";
+import ResetPasswordPage from "@/pages/reset-password";
 import FeedbackPage from "@/pages/feedback";
 import MediaPage from "@/pages/media";
 import DonationsPage from "@/pages/donations";
 import VolunteerHoursPage from "@/pages/volunteer-hours";
 import TeamPage from "@/pages/team";
 import AcceptInvitePage from "@/pages/accept-invite";
+import TermsPage from "@/pages/terms";
+import PrivacyPage from "@/pages/privacy";
+import RefundsPage from "@/pages/refunds";
 
 // ===========================================================================
 // Signed-in area
@@ -96,6 +104,7 @@ function AuthenticatedRouter() {
  * links that would not work yet.
  *
  * DemoBanner renders only for demo visitors and nothing for real accounts.
+ * BillingBanner shows trial days left, read-only mode or a failed payment.
  */
 function AuthenticatedLayout() {
   return (
@@ -105,6 +114,7 @@ function AuthenticatedLayout() {
           <AppSidebar />
           <div className="flex flex-col flex-1 min-w-0">
             <DemoBanner />
+            <BillingBanner />
             <header className="flex items-center justify-between gap-4 p-3 border-b shrink-0 sticky top-0 z-50 bg-background/80 backdrop-blur-lg">
               <SidebarTrigger data-testid="button-sidebar-toggle" />
               <ThemeToggle />
@@ -170,6 +180,10 @@ function AppContent() {
       <Route path="/invite/:token" component={AcceptInvitePage} />
       <Route path="/demo" component={DemoPage} />
       <Route path="/forgot-password" component={ForgotPasswordPage} />
+      <Route path="/reset-password" component={ResetPasswordPage} />
+      <Route path="/terms" component={TermsPage} />
+      <Route path="/privacy" component={PrivacyPage} />
+      <Route path="/refunds" component={RefundsPage} />
 
       {/* Signed-in users go to the dashboard instead of seeing login/signup.
           Each page also honors ?redirect=, which is how invite links send

@@ -4,9 +4,22 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { useOrganization } from "@/hooks/use-organization";
 import { supabase } from "@/lib/supabase";
+import { friendlyWriteError } from "@/lib/db-errors";
+import { ReadOnlyNotice } from "@/components/read-only-notice";
 import { Upload, Image, Mic, Trash2, Play, Pause, Download, Search } from "lucide-react";
 
 interface MediaItem {
@@ -50,12 +63,16 @@ function AudioPlayer({ url }: { url: string }) {
 
 export default function MediaPage() {
   const { user } = useAuth();
+  const { canEdit } = useOrganization();
   const { toast } = useToast();
   const [items, setItems] = useState<MediaItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [filter, setFilter] = useState<"all" | "image" | "audio">("all");
   const [search, setSearch] = useState("");
+  /** The file waiting for delete confirmation. */
+  const [pendingDelete, setPendingDelete] = useState<MediaItem | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadItems = async () => {
@@ -72,6 +89,7 @@ export default function MediaPage() {
     const files = Array.from(e.target.files ?? []);
     if (!files.length || !user) return;
     setIsUploading(true);
+    let uploaded = 0;
 
     for (const file of files) {
       const isImage = file.type.startsWith("image/");
@@ -87,7 +105,7 @@ export default function MediaPage() {
 
       const { data: { publicUrl } } = supabase.storage.from("media").getPublicUrl(path);
 
-      await supabase.from("media_items").insert({
+      const { error: insertError } = await supabase.from("media_items").insert({
         user_id: user.id,
         file_name: file.name,
         file_type: file.type,
@@ -95,20 +113,45 @@ export default function MediaPage() {
         file_size: file.size,
         media_type: isImage ? "image" : "audio",
       });
+      if (insertError) {
+        // Without its record the file would never show in the library, so remove it.
+        await supabase.storage.from("media").remove([path]);
+        toast({ title: `Couldn't add ${file.name}`, description: friendlyWriteError(insertError), variant: "destructive" });
+        continue;
+      }
+      uploaded += 1;
     }
 
     setIsUploading(false);
     loadItems();
-    toast({ title: "Upload complete" });
+    if (uploaded > 0) toast({ title: uploaded === 1 ? "Upload complete" : `${uploaded} files uploaded` });
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const handleDelete = async (item: MediaItem) => {
-    const path = item.file_url.split("/media/")[1];
-    await supabase.storage.from("media").remove([path]);
-    await supabase.from("media_items").delete().eq("id", item.id);
-    toast({ title: "Deleted" });
-    loadItems();
+  /**
+   * Delete the record first, then the file. The other order could leave a
+   * record pointing at a missing file if the record delete were refused.
+   * A refused delete returns no error and no rows, hence the select().
+   */
+  const confirmDelete = async (e: React.MouseEvent) => {
+    e.preventDefault(); // keep the dialog open until finished
+    const item = pendingDelete;
+    if (!item || isDeleting) return;
+    setIsDeleting(true);
+    try {
+      const { data, error } = await supabase.from("media_items").delete().eq("id", item.id).select("id");
+      if (error || !data?.length) {
+        toast({ title: "Couldn't delete", description: friendlyWriteError(error ?? { code: "42501" }), variant: "destructive" });
+        return;
+      }
+      const path = item.file_url.split("/media/")[1];
+      if (path) await supabase.storage.from("media").remove([decodeURIComponent(path)]);
+      toast({ title: "Deleted" });
+      setPendingDelete(null);
+      loadItems();
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const filtered = items.filter((i) => {
@@ -124,14 +167,18 @@ export default function MediaPage() {
           <h1 className="text-2xl font-serif font-bold">Media Library</h1>
           <p className="text-muted-foreground">Photos and voice memos from your organization</p>
         </div>
-        <div className="flex items-center gap-2">
-          <input ref={fileInputRef} type="file" multiple accept="image/*,audio/*" className="hidden" onChange={handleUpload} />
-          <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
-            <Upload className="mr-1 h-4 w-4" />
-            {isUploading ? "Uploading..." : "Upload"}
-          </Button>
-        </div>
+        {canEdit && (
+          <div className="flex items-center gap-2">
+            <input ref={fileInputRef} type="file" multiple accept="image/*,audio/*" className="hidden" onChange={handleUpload} />
+            <Button onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
+              <Upload className="mr-1 h-4 w-4" />
+              {isUploading ? "Uploading..." : "Upload"}
+            </Button>
+          </div>
+        )}
       </div>
+
+      <ReadOnlyNotice />
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-48">
@@ -175,11 +222,13 @@ export default function MediaPage() {
                 {item.media_type === "audio" && <AudioPlayer url={item.file_url} />}
                 <div className="flex items-center gap-1 pt-1 border-t">
                   <a href={item.file_url} download={item.file_name} target="_blank" rel="noopener noreferrer">
-                    <Button variant="ghost" size="sm"><Download className="h-3.5 w-3.5" /></Button>
+                    <Button variant="ghost" size="sm" aria-label={`Download ${item.file_name}`}><Download className="h-3.5 w-3.5" /></Button>
                   </a>
-                  <Button variant="ghost" size="sm" onClick={() => handleDelete(item)} className="ml-auto">
-                    <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                  </Button>
+                  {canEdit && (
+                    <Button variant="ghost" size="sm" onClick={() => setPendingDelete(item)} className="ml-auto" aria-label={`Delete ${item.file_name}`}>
+                      <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                    </Button>
+                  )}
                 </div>
               </div>
             </Card>
@@ -192,13 +241,38 @@ export default function MediaPage() {
           </div>
           <div className="space-y-1.5">
             <h3 className="font-semibold text-lg">No media yet</h3>
-            <p className="text-sm text-muted-foreground max-w-sm mx-auto">Upload photos and voice memos from your organization's activities.</p>
+            {canEdit && (
+              <p className="text-sm text-muted-foreground max-w-sm mx-auto">Upload photos and voice memos from your organization's activities.</p>
+            )}
           </div>
-          <Button onClick={() => fileInputRef.current?.click()}>
-            <Upload className="mr-1 h-4 w-4" /> Upload Files
-          </Button>
+          {canEdit && (
+            <Button onClick={() => fileInputRef.current?.click()}>
+              <Upload className="mr-1 h-4 w-4" /> Upload Files
+            </Button>
+          )}
         </div>
       )}
+
+      <AlertDialog open={pendingDelete !== null} onOpenChange={(open) => !open && !isDeleting && setPendingDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this file?</AlertDialogTitle>
+            <AlertDialogDescription>
+              "{pendingDelete?.file_name}" will be permanently removed for everyone in your organization.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              disabled={isDeleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? "Deleting..." : "Delete file"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

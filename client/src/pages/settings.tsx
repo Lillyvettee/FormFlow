@@ -7,7 +7,7 @@
  *   3. Branding   the organization's logo and theme color, stored in
  *                 "organization_settings" (one row per organization).
  *                 Everyone can see it; only owners and admins can change it.
- *   4. Plan       pricing overview
+ *   4. Plan       free trial, subscription and checkout (PlanSection)
  *   5. Account    email, organization, role and sign out
  *
  * Team accounts:
@@ -29,16 +29,16 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { useOrganization, ROLE_LABELS } from "@/hooks/use-organization";
+import { PlanSection } from "@/components/plan-section";
 import { supabase } from "@/lib/supabase";
+import { PASSWORD_RULES } from "@/lib/password-rules";
 import {
   Settings,
   Building2,
-  Crown,
   Check,
   X,
   UserCog,
@@ -71,40 +71,6 @@ const DEFAULT_COLOR = THEME_COLORS[0].value;
 
 /** Accepts "#1a56db" style hex colors only. */
 const HEX_COLOR_PATTERN = /^#[0-9a-f]{6}$/i;
-
-/**
- * Password rules, shown as a live checklist under the field.
- * Kept identical to the rules on the Signup page, so a password that is
- * accepted at sign-up is also accepted here (and vice versa). The special
- * character rule was missing here before.
- */
-const PASSWORD_RULES: { label: string; test: (pw: string) => boolean }[] = [
-  { label: "At least 8 characters", test: (pw) => pw.length >= 8 },
-  { label: "An uppercase letter", test: (pw) => /[A-Z]/.test(pw) },
-  { label: "A lowercase letter", test: (pw) => /[a-z]/.test(pw) },
-  { label: "A number", test: (pw) => /\d/.test(pw) },
-  { label: "A special character, like ! # or ?", test: (pw) => /[^A-Za-z0-9]/.test(pw) },
-];
-
-/** Pricing shown in the Plan section. Kept as data so prices live in one place. */
-const PLANS = [
-  {
-    id: "monthly",
-    name: "Starter",
-    price: "$5",
-    billing: "Billed monthly",
-    badge: null,
-    features: ["Unlimited forms", "Impact reports", "Resource tracking"],
-  },
-  {
-    id: "yearly",
-    name: "Mission",
-    price: "$3",
-    billing: "Billed $36/year",
-    badge: "Save 40%",
-    features: ["Everything in Starter", "Priority support", "Custom branding"],
-  },
-];
 
 // ===========================================================================
 // Helpers
@@ -217,7 +183,7 @@ function PasswordInput({
 export default function SettingsPage() {
   const { toast } = useToast();
   const { user, logout } = useAuth();
-  const { organization, role, isAdmin } = useOrganization();
+  const { organization, role, isAdmin, refresh: refreshOrganization } = useOrganization();
 
   // ----- Profile -----
   const [fullName, setFullName] = useState("");
@@ -422,6 +388,8 @@ export default function SettingsPage() {
       }
       setLogoUrl(next.logoUrl);
       setSavedBranding(next);
+      // Re-theme the app and update the sidebar logo right away.
+      await refreshOrganization();
       toast({ title: "Branding saved" });
     } catch (err) {
       toast({
@@ -847,36 +815,8 @@ export default function SettingsPage() {
         )}
       </Card>
 
-      {/* ===== Plan =====
-          The original cards had cursor-pointer and a hover effect but did
-          nothing when clicked, which looks broken. They are now presented as
-          plain information. When billing is ready, add a "Choose plan" button
-          to each card that starts checkout. */}
-      <Card className="p-6">
-        <SectionHeader icon={Crown} title="Plan" description="Choose the right plan for your organization" />
-        <div className="grid sm:grid-cols-2 gap-4">
-          {PLANS.map((plan) => (
-            <Card key={plan.id} className="p-5" data-testid={`card-plan-${plan.id}`}>
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="font-semibold text-lg">{plan.name}</h3>
-                {plan.badge && <Badge variant="default">{plan.badge}</Badge>}
-              </div>
-              <p className="text-3xl font-bold mt-2">
-                {plan.price}
-                <span className="text-sm font-normal text-muted-foreground">/mo</span>
-              </p>
-              <p className="text-sm text-muted-foreground mt-2">{plan.billing}</p>
-              <ul className="mt-4 space-y-1.5 text-sm">
-                {plan.features.map((feature) => (
-                  <li key={feature} className="flex items-center gap-2">
-                    <Check className="h-3.5 w-3.5 text-primary shrink-0" aria-hidden="true" /> {feature}
-                  </li>
-                ))}
-              </ul>
-            </Card>
-          ))}
-        </div>
-      </Card>
+      {/* ===== Plan ===== */}
+      <PlanSection />
 
       {/* ===== Account ===== */}
       <Card className="p-6">

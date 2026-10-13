@@ -1,6 +1,8 @@
+import { useEffect, useState } from "react";
 import { useLocation, Link } from "wouter";
 import { LayoutDashboard, FileText, BarChart3, LinkIcon, Package, Settings, LogOut, Heart, Image, MessageSquare, DollarSign, Clock } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { useOrganization } from "@/hooks/use-organization";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   Sidebar,
@@ -38,6 +40,11 @@ const bottomItems = [
 export function AppSidebar() {
   const [location] = useLocation();
   const { user } = useAuth();
+  const { organization, branding } = useOrganization();
+  // Fall back to the FormFlow mark if the logo link is broken.
+  const [logoFailed, setLogoFailed] = useState(false);
+  useEffect(() => setLogoFailed(false), [branding.logoUrl]);
+  const showLogo = Boolean(branding.logoUrl) && !logoFailed;
 
   const fullName = user?.user_metadata?.full_name ?? "";
   const email = user?.email ?? "";
@@ -60,11 +67,22 @@ export function AppSidebar() {
   return (
     <Sidebar>
       <SidebarHeader className="p-4">
-        <div className="flex items-center gap-2.5">
-          <div className="h-8 w-8 rounded-md bg-primary flex items-center justify-center shrink-0">
-            <Heart className="h-4 w-4 text-primary-foreground" />
-          </div>
-          <span className="font-semibold text-base tracking-tight" data-testid="text-sidebar-title">FormFlow</span>
+        <div className="flex items-center gap-2.5 min-w-0">
+          {showLogo ? (
+            <img
+              src={branding.logoUrl ?? undefined}
+              alt=""
+              className="h-8 w-8 rounded-md object-contain shrink-0"
+              onError={() => setLogoFailed(true)}
+            />
+          ) : (
+            <div className="h-8 w-8 rounded-md bg-primary flex items-center justify-center shrink-0">
+              <Heart className="h-4 w-4 text-primary-foreground" aria-hidden="true" />
+            </div>
+          )}
+          <span className="font-semibold text-base tracking-tight truncate" data-testid="text-sidebar-title">
+            {organization?.name || "FormFlow"}
+          </span>
         </div>
       </SidebarHeader>
 

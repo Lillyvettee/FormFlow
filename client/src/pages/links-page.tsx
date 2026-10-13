@@ -13,10 +13,14 @@
  *     - Deleting a folder moves its links to Uncategorized (links are kept).
  *     - Links with no category are shown under "Uncategorized".
  *
+ * Read-only mode (viewers, or an ended trial): add, edit, delete and folder
+ * buttons are hidden; searching, opening and copying links still work.
+ *
  * Backend assumptions:
  *   - Columns: id, user_id, title, url, description, category, created_at.
- *   - Row Level Security restricts rows to their owner. The extra
- *     .eq("user_id", ...) filters below are a second line of defense.
+ *   - Row Level Security limits rows to the user's organization and blocks
+ *     changes from viewers, so folders are shared by the whole team. user_id
+ *     records who added the link; it isn't used for access.
  */
 
 import { useState, useEffect, useCallback, useMemo } from "react";
@@ -30,6 +34,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
+import { useOrganization } from "@/hooks/use-organization";
+import { ReadOnlyNotice } from "@/components/read-only-notice";
+import { friendlyWriteError } from "@/lib/db-errors";
 import {
   Plus,
   LinkIcon,
@@ -167,6 +174,7 @@ const loadCollapsed = (): Set<string> => {
 
 export default function LinksPage() {
   const { user } = useAuth();
+  const { canEdit } = useOrganization();
   const { toast } = useToast();
 
   // ----- Data state -----
@@ -221,7 +229,6 @@ export default function LinksPage() {
     const { data, error } = await supabase
       .from("links")
       .select("*")
-      .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -369,7 +376,7 @@ export default function LinksPage() {
    * - Title and description are trimmed; folder names are matched to
    *   existing folders case-insensitively.
    * - try/finally so the Saving state always clears, even if the request throws.
-   * - Update is filtered by user_id as well as id.
+   * - Editing keeps the original creator: user_id is only set on new links.
    */
   const handleSave = async () => {
     setUrlTouched(true);
@@ -383,15 +390,14 @@ export default function LinksPage() {
         url: normalizedUrl,
         description: description.trim() || null,
         category: folder,
-        user_id: user.id,
       };
 
       const { error } = editingLink
-        ? await supabase.from("links").update(payload).eq("id", editingLink.id).eq("user_id", user.id)
-        : await supabase.from("links").insert(payload);
+        ? await supabase.from("links").update(payload).eq("id", editingLink.id)
+        : await supabase.from("links").insert({ ...payload, user_id: user.id });
 
       if (error) {
-        toast({ title: "Could not save link", description: error.message, variant: "destructive" });
+        toast({ title: "Could not save link", description: friendlyWriteError(error), variant: "destructive" });
         return;
       }
 
@@ -412,7 +418,7 @@ export default function LinksPage() {
     } catch (err) {
       toast({
         title: "Could not save link",
-        description: err instanceof Error ? err.message : "Check your connection and try again.",
+        description: friendlyWriteError(err as { message?: string; code?: string }, "Check your connection and try again."),
         variant: "destructive",
       });
     } finally {
@@ -432,7 +438,7 @@ export default function LinksPage() {
       confirmLabel: "Delete link",
       onConfirm: async () => {
         if (!user) return;
-        const { error } = await supabase.from("links").delete().eq("id", link.id).eq("user_id", user.id);
+        const { error } = await supabase.from("links").delete().eq("id", link.id);
         if (error) throw error;
         toast({ title: "Link deleted" });
         await loadLinks();
@@ -455,7 +461,6 @@ export default function LinksPage() {
         const { error } = await supabase
           .from("links")
           .update({ category: null })
-          .eq("user_id", user.id)
           .eq("category", folder);
         if (error) throw error;
         toast({ title: "Folder removed", description: `Links moved to ${UNCATEGORIZED_LABEL}.` });
@@ -474,7 +479,7 @@ export default function LinksPage() {
     } catch (err) {
       toast({
         title: "Something went wrong",
-        description: err instanceof Error ? err.message : "Check your connection and try again.",
+        description: friendlyWriteError(err as { message?: string; code?: string }, "Check your connection and try again."),
         variant: "destructive",
       });
     } finally {
@@ -544,11 +549,10 @@ export default function LinksPage() {
       const { error } = await supabase
         .from("links")
         .update({ category: newName })
-        .eq("user_id", user.id)
         .eq("category", oldName);
 
       if (error) {
-        toast({ title: "Could not rename folder", description: error.message, variant: "destructive" });
+        toast({ title: "Could not rename folder", description: friendlyWriteError(error), variant: "destructive" });
         return;
       }
 
@@ -568,7 +572,7 @@ export default function LinksPage() {
     } catch (err) {
       toast({
         title: "Could not rename folder",
-        description: err instanceof Error ? err.message : "Check your connection and try again.",
+        description: friendlyWriteError(err as { message?: string; code?: string }, "Check your connection and try again."),
         variant: "destructive",
       });
     } finally {
@@ -614,15 +618,18 @@ export default function LinksPage() {
           <h1 className="text-2xl font-serif font-bold">Links</h1>
           <p className="text-muted-foreground">Organize partner websites, grant portals, and resources</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={openCreateFolder}>
-            <FolderPlus className="mr-1 h-4 w-4" aria-hidden="true" /> New folder
-          </Button>
-          <Button onClick={() => openCreate()}>
-            <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Add link
-          </Button>
-        </div>
+        {canEdit && (
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={openCreateFolder}>
+              <FolderPlus className="mr-1 h-4 w-4" aria-hidden="true" /> New folder
+            </Button>
+            <Button onClick={() => openCreate()}>
+              <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Add link
+            </Button>
+          </div>
+        )}
       </div>
+      <ReadOnlyNotice />
 
       {/* ===== Search (only once there are links) ===== */}
       {!isLoading && links.length > 0 && (
@@ -659,12 +666,16 @@ export default function LinksPage() {
           <div className="space-y-1.5">
             <h3 className="font-semibold text-lg">No links saved</h3>
             <p className="text-sm text-muted-foreground max-w-sm mx-auto">
-              Save partner websites, grant portals, and resources your team needs.
+              {canEdit
+                ? "Save partner websites, grant portals, and resources your team needs."
+                : "Links will appear here once they are added."}
             </p>
           </div>
-          <Button onClick={() => openCreate()}>
-            <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Add first link
-          </Button>
+          {canEdit && (
+            <Button onClick={() => openCreate()}>
+              <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Add first link
+            </Button>
+          )}
         </div>
       ) : sortedGroups.length === 0 ? (
         // Links exist, but the search hides all of them.
@@ -705,43 +716,45 @@ export default function LinksPage() {
                     <span className="text-muted-foreground font-normal">({folderLinks.length})</span>
                   </button>
 
-                  {/* Folder actions. Uncategorized is not a real folder, so it only gets "Add". */}
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-xs h-7"
-                      onClick={() => openCreate(isUncategorized ? "" : folderKey)}
-                    >
-                      <Plus className="mr-1 h-3 w-3" aria-hidden="true" /> Add to folder
-                    </Button>
-                    {!isUncategorized && (
-                      <>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7"
-                          onClick={() => openRenameFolder(folderKey)}
-                          aria-label={`Rename ${label} folder`}
-                          title="Rename folder"
-                        >
-                          <Pencil className="h-3 w-3" aria-hidden="true" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 text-destructive hover:text-destructive"
-                          onClick={() =>
-                            requestDeleteFolder(folderKey, links.filter((l) => l.category === folderKey).length)
-                          }
-                          aria-label={`Remove ${label} folder`}
-                          title="Remove folder"
-                        >
-                          <Trash2 className="h-3 w-3" aria-hidden="true" />
-                        </Button>
-                      </>
-                    )}
-                  </div>
+                  {/* Folder actions (hidden when read-only). Uncategorized is not a real folder, so it only gets "Add". */}
+                  {canEdit && (
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs h-7"
+                        onClick={() => openCreate(isUncategorized ? "" : folderKey)}
+                      >
+                        <Plus className="mr-1 h-3 w-3" aria-hidden="true" /> Add to folder
+                      </Button>
+                      {!isUncategorized && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7"
+                            onClick={() => openRenameFolder(folderKey)}
+                            aria-label={`Rename ${label} folder`}
+                            title="Rename folder"
+                          >
+                            <Pencil className="h-3 w-3" aria-hidden="true" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-destructive hover:text-destructive"
+                            onClick={() =>
+                              requestDeleteFolder(folderKey, links.filter((l) => l.category === folderKey).length)
+                            }
+                            aria-label={`Remove ${label} folder`}
+                            title="Remove folder"
+                          >
+                            <Trash2 className="h-3 w-3" aria-hidden="true" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* ----- Link cards ----- */}
@@ -766,24 +779,28 @@ export default function LinksPage() {
                               >
                                 <Copy className="h-3.5 w-3.5" aria-hidden="true" />
                               </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => openEdit(link)}
-                                aria-label={`Edit ${link.title}`}
-                                title="Edit"
-                              >
-                                <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => requestDeleteLink(link)}
-                                aria-label={`Delete ${link.title}`}
-                                title="Delete"
-                              >
-                                <Trash2 className="h-3.5 w-3.5 text-destructive" aria-hidden="true" />
-                              </Button>
+                              {canEdit && (
+                                <>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => openEdit(link)}
+                                    aria-label={`Edit ${link.title}`}
+                                    title="Edit"
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => requestDeleteLink(link)}
+                                    aria-label={`Delete ${link.title}`}
+                                    title="Delete"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5 text-destructive" aria-hidden="true" />
+                                  </Button>
+                                </>
+                              )}
                             </div>
                           </div>
 
@@ -809,7 +826,7 @@ export default function LinksPage() {
                             </a>
                           ) : (
                             <p className="mt-auto pt-3 flex items-center gap-1 text-xs text-destructive">
-                              <AlertTriangle className="h-3 w-3" aria-hidden="true" /> Invalid address. Edit to fix.
+                              <AlertTriangle className="h-3 w-3" aria-hidden="true" /> Invalid address.{canEdit && " Edit to fix."}
                             </p>
                           )}
                         </Card>

@@ -3,7 +3,7 @@
  *
  * Lets a signed-in user record, edit, delete, search, chart and export the
  * donations their organization has received. All rows are stored in the
- * Supabase "donations" table and are scoped to the current user via user_id.
+ * Supabase "donations" table and are shared with everyone in the organization.
  *
  * Main sections of the page, top to bottom:
  *   1. Header with "Export CSV" and "Record donation" actions
@@ -14,9 +14,9 @@
  *
  * Assumptions about the backend:
  *   - Table "donations" has the columns listed in the Donation interface plus user_id.
- *   - Row Level Security (RLS) is enabled so a user can only touch their own rows.
- *     The extra .eq("user_id", ...) filters below are a second line of defense,
- *     not a replacement for RLS.
+ *   - Row Level Security (RLS) limits rows to the user's organization and
+ *     blocks changes from viewers. user_id records who created the row; it
+ *     isn't used for access.
  */
 
 import { useState, useEffect, useCallback, useMemo } from "react";
@@ -33,6 +33,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
+import { useOrganization } from "@/hooks/use-organization";
+import { ReadOnlyNotice } from "@/components/read-only-notice";
+import { friendlyWriteError } from "@/lib/db-errors";
 import { Plus, DollarSign, Trash2, Pencil, Download, TrendingUp, Search } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
@@ -139,6 +142,8 @@ const normalizeName = (name: string): string => name.trim().toLowerCase().replac
 export default function DonationsPage() {
   const { user } = useAuth();
   const { toast } = useToast();
+  /** False for viewers and for read-only organizations; hides add/edit/delete controls. */
+  const { canEdit } = useOrganization();
 
   // ----- Data state -----
   const [donations, setDonations] = useState<Donation[]>([]);
@@ -188,7 +193,6 @@ export default function DonationsPage() {
     const { data, error } = await supabase
       .from("donations")
       .select("*")
-      .eq("user_id", user.id)
       .order("date", { ascending: false })
       // Secondary sort keeps same-day donations in a stable, predictable order.
       .order("created_at", { ascending: false });
@@ -271,7 +275,7 @@ export default function DonationsPage() {
    * - Uses try/finally so the "Saving..." state always clears, even if the
    *   request throws (network failure) instead of returning an error object.
    * - Rounds the amount to cents to avoid floating point values like 10.004.
-   * - Update is filtered by user_id as well as id.
+   * - Editing keeps the original creator: user_id is only set on new rows.
    */
   const handleSave = async () => {
     if (!user || !isFormValid) return;
@@ -279,7 +283,6 @@ export default function DonationsPage() {
     setIsSaving(true);
     try {
       const payload = {
-        user_id: user.id,
         donor_name: donorName.trim(),
         amount: Math.round(parsedAmount * 100) / 100,
         date,
@@ -293,11 +296,10 @@ export default function DonationsPage() {
             .from("donations")
             .update(payload)
             .eq("id", editingDonation.id)
-            .eq("user_id", user.id)
-        : await supabase.from("donations").insert(payload);
+        : await supabase.from("donations").insert({ ...payload, user_id: user.id });
 
       if (error) {
-        toast({ title: "Could not save donation", description: error.message, variant: "destructive" });
+        toast({ title: "Could not save donation", description: friendlyWriteError(error), variant: "destructive" });
         return;
       }
 
@@ -307,7 +309,7 @@ export default function DonationsPage() {
     } catch (err) {
       toast({
         title: "Could not save donation",
-        description: err instanceof Error ? err.message : "Check your connection and try again.",
+        description: friendlyWriteError(err instanceof Error ? err : null, "Check your connection and try again."),
         variant: "destructive",
       });
     } finally {
@@ -334,11 +336,10 @@ export default function DonationsPage() {
       const { error } = await supabase
         .from("donations")
         .delete()
-        .eq("id", pendingDelete.id)
-        .eq("user_id", user.id);
+        .eq("id", pendingDelete.id);
 
       if (error) {
-        toast({ title: "Could not delete donation", description: error.message, variant: "destructive" });
+        toast({ title: "Could not delete donation", description: friendlyWriteError(error), variant: "destructive" });
         return;
       }
 
@@ -348,7 +349,7 @@ export default function DonationsPage() {
     } catch (err) {
       toast({
         title: "Could not delete donation",
-        description: err instanceof Error ? err.message : "Check your connection and try again.",
+        description: friendlyWriteError(err instanceof Error ? err : null, "Check your connection and try again."),
         variant: "destructive",
       });
     } finally {
@@ -486,11 +487,14 @@ export default function DonationsPage() {
               <Download className="mr-1 h-4 w-4" aria-hidden="true" /> Export CSV
             </Button>
           )}
-          <Button onClick={openCreate}>
-            <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Record donation
-          </Button>
+          {canEdit && (
+            <Button onClick={openCreate}>
+              <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Record donation
+            </Button>
+          )}
         </div>
       </div>
+      <ReadOnlyNotice />
 
       {/* ===== Summary stats ===== */}
       {/* Skeletons while loading, so the cards do not briefly show $0.00. */}
@@ -575,14 +579,14 @@ export default function DonationsPage() {
                   <TableHead>Campaign</TableHead>
                   <TableHead>Method</TableHead>
                   <TableHead>Notes</TableHead>
-                  <TableHead className="w-20">Actions</TableHead>
+                  {canEdit && <TableHead className="w-20">Actions</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredDonations.length === 0 ? (
                   // Search returned nothing: explain why the table is empty.
                   <TableRow>
-                    <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
+                    <TableCell colSpan={canEdit ? 7 : 6} className="py-10 text-center text-muted-foreground">
                       No donations match "{searchQuery}".
                     </TableCell>
                   </TableRow>
@@ -600,27 +604,29 @@ export default function DonationsPage() {
                       <TableCell className="max-w-[150px] truncate text-muted-foreground" title={d.notes ?? undefined}>
                         {d.notes ?? "-"}
                       </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1">
-                          {/* aria-labels give screen readers a name for these icon-only buttons. */}
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => openEdit(d)}
-                            aria-label={`Edit donation from ${d.donor_name}`}
-                          >
-                            <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setPendingDelete(d)}
-                            aria-label={`Delete donation from ${d.donor_name}`}
-                          >
-                            <Trash2 className="h-3.5 w-3.5 text-destructive" aria-hidden="true" />
-                          </Button>
-                        </div>
-                      </TableCell>
+                      {canEdit && (
+                        <TableCell>
+                          <div className="flex items-center gap-1">
+                            {/* aria-labels give screen readers a name for these icon-only buttons. */}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => openEdit(d)}
+                              aria-label={`Edit donation from ${d.donor_name}`}
+                            >
+                              <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setPendingDelete(d)}
+                              aria-label={`Delete donation from ${d.donor_name}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5 text-destructive" aria-hidden="true" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))
                 )}
@@ -637,12 +643,16 @@ export default function DonationsPage() {
           <div className="space-y-1.5">
             <h3 className="font-semibold text-lg">No donations recorded</h3>
             <p className="text-sm text-muted-foreground max-w-sm mx-auto">
-              Start tracking donations to generate reports for your board and grant applications.
+              {canEdit
+                ? "Start tracking donations to generate reports for your board and grant applications."
+                : "Donations your organization records will appear here."}
             </p>
           </div>
-          <Button onClick={openCreate}>
-            <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Record first donation
-          </Button>
+          {canEdit && (
+            <Button onClick={openCreate}>
+              <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Record first donation
+            </Button>
+          )}
         </div>
       )}
 

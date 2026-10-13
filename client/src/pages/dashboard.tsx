@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
+import { useOrganization } from "@/hooks/use-organization";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import type { Form, InventoryItem } from "@/types/database";
 
@@ -91,7 +92,6 @@ async function fetchDashboard(userId: string): Promise<DashboardData> {
   const formsRes = await supabase
     .from("forms")
     .select("*")
-    .eq("user_id", userId)
     .order("created_at", { ascending: false });
   if (formsRes.error) throw formsRes.error;
 
@@ -101,9 +101,9 @@ async function fetchDashboard(userId: string): Promise<DashboardData> {
 
   const [inventoryRes, donationsRes, volunteerRes, subsTotalRes, subsMonthRes, subsChartRes, subsRecentRes] =
     await Promise.all([
-      supabase.from("inventory_items").select("*").eq("user_id", userId),
-      supabase.from("donations").select("amount, created_at, donor_name").eq("user_id", userId).order("created_at", { ascending: false }),
-      supabase.from("volunteer_hours").select("hours, date, created_at, volunteer_name, activity").eq("user_id", userId).order("created_at", { ascending: false }),
+      supabase.from("inventory_items").select("*"),
+      supabase.from("donations").select("amount, created_at, donor_name").order("created_at", { ascending: false }),
+      supabase.from("volunteer_hours").select("hours, date, created_at, volunteer_name, activity").order("created_at", { ascending: false }),
       // Real counts (head requests) so totals aren't capped by a row limit.
       formIds.length
         ? supabase.from("form_submissions").select("id", { count: "exact", head: true }).in("form_id", formIds)
@@ -180,6 +180,7 @@ async function fetchDashboard(userId: string): Promise<DashboardData> {
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const { canEdit } = useOrganization();
   const [data, setData] = useState<DashboardData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -261,11 +262,13 @@ export default function DashboardPage() {
           </h1>
           <p className="text-muted-foreground">Here's your organization's impact at a glance</p>
         </div>
-        <Link href="/forms">
-          <Button data-testid="button-new-form">
-            <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> New Form
-          </Button>
-        </Link>
+        {canEdit && (
+          <Link href="/forms">
+            <Button data-testid="button-new-form">
+              <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> New Form
+            </Button>
+          </Link>
+        )}
       </div>
 
       {/* Load error */}
@@ -436,11 +439,13 @@ export default function DashboardPage() {
                 <FileText className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
               </div>
               <p className="text-sm text-muted-foreground">No forms yet</p>
-              <Link href="/forms">
-                <Button size="sm" data-testid="button-create-first-form">
-                  <Plus className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> Create Your First Form
-                </Button>
-              </Link>
+              {canEdit && (
+                <Link href="/forms">
+                  <Button size="sm" data-testid="button-create-first-form">
+                    <Plus className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> Create Your First Form
+                  </Button>
+                </Link>
+              )}
             </div>
           )}
         </Card>

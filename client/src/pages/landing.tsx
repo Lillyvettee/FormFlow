@@ -182,7 +182,7 @@ const FORM_CAPABILITIES: { icon: LucideIcon; title: string; desc: string; color:
   },
 ];
 
-/** Pricing plans. Keep in sync with the Plan section on the Settings page. */
+/** Pricing plans. Keep in sync with PLANS in components/plan-section.tsx and the Stripe prices. */
 const PLANS: {
   name: string;
   price: string;
@@ -203,7 +203,7 @@ const PLANS: {
       "Media library",
       "Inventory with low-stock alerts",
     ],
-    cta: "Start Free",
+    cta: "Start 30-day free trial",
     highlight: false,
   },
   {
@@ -212,7 +212,7 @@ const PLANS: {
     period: "per month, billed annually",
     badge: "Save 40%",
     features: ["Everything in Starter", "Custom organization branding", "Priority support", "Early access to new features"],
-    cta: "Get Mission Plan",
+    cta: "Start 30-day free trial",
     highlight: true,
   },
 ];
@@ -592,7 +592,9 @@ export default function LandingPage() {
               <h2 id="pricing-heading" className="text-4xl font-serif font-bold">
                 Priced for non-profit budgets
               </h2>
-              <p className="text-muted-foreground text-lg">Spend your funds on your mission, not your tools.</p>
+              <p className="text-muted-foreground text-lg">
+                Spend your funds on your mission, not your tools. Every plan starts with 30 days free, no card needed.
+              </p>
             </div>
 
             <div className="grid sm:grid-cols-2 gap-6">
@@ -683,7 +685,7 @@ export default function LandingPage() {
             <span>Built for non-profits</span>
           </div>
           <nav aria-label="Footer">
-            <ul className="flex items-center gap-6">
+            <ul className="flex flex-wrap items-center gap-x-6 gap-y-2">
               <li>
                 <a href="/login" className="hover:text-foreground transition-colors">
                   Sign In
@@ -697,6 +699,21 @@ export default function LandingPage() {
               <li>
                 <a href="/feedback" className="hover:text-foreground transition-colors">
                   Contact
+                </a>
+              </li>
+              <li>
+                <a href="/terms" className="hover:text-foreground transition-colors">
+                  Terms
+                </a>
+              </li>
+              <li>
+                <a href="/privacy" className="hover:text-foreground transition-colors">
+                  Privacy
+                </a>
+              </li>
+              <li>
+                <a href="/refunds" className="hover:text-foreground transition-colors">
+                  Refunds
                 </a>
               </li>
             </ul>

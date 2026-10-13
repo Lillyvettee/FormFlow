@@ -15,8 +15,9 @@
  * Backend assumptions:
  *   - Columns: id, user_id, volunteer_name, activity, hours (numeric),
  *     date ("YYYY-MM-DD"), notes, created_at.
- *   - Row Level Security restricts rows to their owner. The extra
- *     .eq("user_id", ...) filters below are a second line of defense.
+ *   - Row Level Security limits rows to the user's organization and blocks
+ *     changes from viewers. user_id records who logged the entry; it isn't
+ *     used for access.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -42,6 +43,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
+import { useOrganization } from "@/hooks/use-organization";
+import { ReadOnlyNotice } from "@/components/read-only-notice";
+import { friendlyWriteError } from "@/lib/db-errors";
 import {
   Plus,
   Clock,
@@ -202,14 +206,12 @@ const monthRange = (first: string, last: string): string[] => {
 };
 
 /**
- * Readable message from anything thrown. Supabase errors are plain objects
- * with a message (not Error instances), so both shapes are handled. Replaces
- * the original `catch (e: any)`.
+ * Readable message from anything thrown by a save or delete. Supabase errors
+ * are plain objects with a message (not Error instances), so both shapes are
+ * handled, and permission errors become plain language (see friendlyWriteError).
  */
 const errorMessage = (e: unknown, fallback: string): string =>
-  e && typeof e === "object" && "message" in e && typeof (e as { message: unknown }).message === "string"
-    ? (e as { message: string }).message
-    : fallback;
+  friendlyWriteError(e && typeof e === "object" ? (e as { message?: string; code?: string }) : null, fallback);
 
 /** Read the saved hourly value, ignoring blocked storage. */
 const loadSavedRate = (): string => {
@@ -257,7 +259,6 @@ function useVolunteerHours(userId: string | undefined) {
           const { data, error: fetchError } = await supabase
             .from("volunteer_hours")
             .select("*")
-            .eq("user_id", userId)
             .order("date", { ascending: false })
             .order("id") // tie-breaker keeps paging stable when many rows share a date
             .range(from, from + FETCH_PAGE_SIZE - 1);
@@ -340,6 +341,8 @@ export default function VolunteerHoursPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const { records, isLoading, error, reload, retry } = useVolunteerHours(user?.id);
+  /** False for viewers and for read-only organizations; hides add/edit/delete controls. */
+  const { canEdit } = useOrganization();
 
   // ----- Dialog / form -----
   const [showDialog, setShowDialog] = useState(false);
@@ -599,7 +602,6 @@ export default function VolunteerHoursPage() {
     setIsSaving(true);
     try {
       const base = {
-        user_id: user.id,
         activity: existingActivity ?? form.activity.trim(),
         hours: round2(h),
         date: form.date,
@@ -610,14 +612,13 @@ export default function VolunteerHoursPage() {
         const { error: updateError } = await supabase
           .from("volunteer_hours")
           .update({ ...base, volunteer_name: names[0] })
-          .eq("id", editingRecord.id)
-          .eq("user_id", user.id);
+          .eq("id", editingRecord.id);
         if (updateError) throw updateError;
         toast({ title: "Entry updated" });
       } else {
         const { error: insertError } = await supabase
           .from("volunteer_hours")
-          .insert(names.map((volunteer_name) => ({ ...base, volunteer_name })));
+          .insert(names.map((volunteer_name) => ({ ...base, volunteer_name, user_id: user.id })));
         if (insertError) throw insertError;
         toast({ title: names.length > 1 ? `${names.length} entries logged` : "Hours logged" });
       }
@@ -763,11 +764,14 @@ export default function VolunteerHoursPage() {
               </Button>
             </>
           )}
-          <Button onClick={openCreate}>
-            <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Log hours
-          </Button>
+          {canEdit && (
+            <Button onClick={openCreate}>
+              <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Log hours
+            </Button>
+          )}
         </div>
       </div>
+      <ReadOnlyNotice />
 
       {/* ===== Load error ===== */}
       {error && (
@@ -995,7 +999,7 @@ export default function VolunteerHoursPage() {
                   <SortHead k="hours" label="Hours" className="text-right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   <SortHead k="date" label="Date" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                   <TableHead>Notes</TableHead>
-                  <TableHead className="w-20">Actions</TableHead>
+                  {canEdit && <TableHead className="w-20">Actions</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -1010,26 +1014,28 @@ export default function VolunteerHoursPage() {
                     <TableCell className="max-w-[150px] truncate text-muted-foreground" title={r.notes ?? undefined}>
                       {r.notes ?? "-"}
                     </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={`Edit entry for ${r.volunteer_name}`}
-                          onClick={() => openEdit(r)}
-                        >
-                          <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={`Delete entry for ${r.volunteer_name}`}
-                          onClick={() => setPendingDelete(r)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5 text-destructive" aria-hidden="true" />
-                        </Button>
-                      </div>
-                    </TableCell>
+                    {canEdit && (
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Edit entry for ${r.volunteer_name}`}
+                            onClick={() => openEdit(r)}
+                          >
+                            <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Delete entry for ${r.volunteer_name}`}
+                            onClick={() => setPendingDelete(r)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5 text-destructive" aria-hidden="true" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>
@@ -1086,12 +1092,16 @@ export default function VolunteerHoursPage() {
           <div className="space-y-1.5">
             <h3 className="font-semibold text-lg">No hours logged yet</h3>
             <p className="text-sm text-muted-foreground max-w-sm mx-auto">
-              Track volunteer time to strengthen grant applications and show your community impact.
+              {canEdit
+                ? "Track volunteer time to strengthen grant applications and show your community impact."
+                : "Volunteer hours your organization logs will appear here."}
             </p>
           </div>
-          <Button onClick={openCreate}>
-            <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Log first hours
-          </Button>
+          {canEdit && (
+            <Button onClick={openCreate}>
+              <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Log first hours
+            </Button>
+          )}
         </div>
       ) : null}
 
