@@ -41,7 +41,7 @@ export function AppSidebar() {
   const [location] = useLocation();
   const { user } = useAuth();
   const { organization, branding } = useOrganization();
-  // Fall back to the FormFlow mark if the logo link is broken.
+  // Fall back to the HumMotion mark if the logo link is broken.
   const [logoFailed, setLogoFailed] = useState(false);
   useEffect(() => setLogoFailed(false), [branding.logoUrl]);
   const showLogo = Boolean(branding.logoUrl) && !logoFailed;
@@ -81,7 +81,7 @@ export function AppSidebar() {
             </div>
           )}
           <span className="font-semibold text-base tracking-tight truncate" data-testid="text-sidebar-title">
-            {organization?.name || "FormFlow"}
+            {organization?.name || "HumMotion"}
           </span>
         </div>
       </SidebarHeader>

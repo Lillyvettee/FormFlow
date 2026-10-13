@@ -12,6 +12,7 @@
  *                        signed-in users are sent to the dashboard instead
  *     /forgot-password
  *     /reset-password    where password reset emails land
+ *     /delete-account    where account deletion confirmation emails land
  *     /terms, /privacy, /refunds   legal pages (linked from landing, signup
  *                        and the Plan section)
  *
@@ -57,6 +58,7 @@ import SignupPage from "@/pages/signup";
 import LoginPage from "@/pages/login";
 import ForgotPasswordPage from "@/pages/forgot-password";
 import ResetPasswordPage from "@/pages/reset-password";
+import DeleteAccountPage from "@/pages/delete-account";
 import FeedbackPage from "@/pages/feedback";
 import MediaPage from "@/pages/media";
 import DonationsPage from "@/pages/donations";
@@ -181,6 +183,7 @@ function AppContent() {
       <Route path="/demo" component={DemoPage} />
       <Route path="/forgot-password" component={ForgotPasswordPage} />
       <Route path="/reset-password" component={ResetPasswordPage} />
+      <Route path="/delete-account" component={DeleteAccountPage} />
       <Route path="/terms" component={TermsPage} />
       <Route path="/privacy" component={PrivacyPage} />
       <Route path="/refunds" component={RefundsPage} />

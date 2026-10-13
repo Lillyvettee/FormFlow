@@ -8,7 +8,7 @@
 //   STRIPE_PRICE_MISSION     price_... for Mission ($36/year)
 //   STRIPE_DEMO_COUPON_ID    the 50%-off, duration "forever" coupon
 //   STRIPE_WEBHOOK_SECRET    whsec_... (stripe-webhook only)
-//   SITE_URL                 e.g. https://formflow.vercel.app
+//   SITE_URL                 e.g. https://your-site.vercel.app
 //   RESEND_API_KEY           re_... (stripe-webhook only)
 //   NOTIFY_EMAIL             where "someone locked in" emails go
 //   NOTIFY_FROM              optional; defaults to Resend's test sender

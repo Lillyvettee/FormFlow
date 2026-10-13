@@ -21,6 +21,7 @@ In the Supabase dashboard, open **SQL Editor** and run each file, in order:
 1. `supabase/migrations/003_shared_media_and_signup_fix.sql`
 2. `supabase/migrations/004_billing.sql`
 3. `supabase/migrations/006_branding_and_demo_data.sql` (lets demo visitors sign in, adds sample data and public form branding)
+4. `supabase/migrations/007_account_deletion.sql` (keeps a team's records when a member deletes their account)
 
 `005_trial_reminders.sql` comes later, in step 6.
 
@@ -47,7 +48,7 @@ Every existing organization's 30 days start when you run 004.
 Resend's built-in sender (`onboarding@resend.dev`) can only send to the address you signed up with. That's enough for your discount alerts, but **trial reminder emails go to customers, so they need your own domain**:
 
 3. **Domains > Add domain**. Add the DNS records Resend shows you, where your domain is managed. Wait until it says Verified.
-4. Choose a sender on that domain, for example `FormFlow <billing@yourdomain.com>`. You'll set it as `NOTIFY_FROM` in step 4.
+4. Choose a sender on that domain, for example `HumMotion <billing@yourdomain.com>`. You'll set it as `NOTIFY_FROM` in step 4.
 
 Until `NOTIFY_FROM` is set, the reminder job runs but sends nothing. Its log says why.
 
@@ -66,18 +67,22 @@ npx supabase secrets set STRIPE_DEMO_COUPON_ID=DEMO_HALF_OFF
 npx supabase secrets set SITE_URL=https://your-site.vercel.app
 npx supabase secrets set RESEND_API_KEY=re_...
 npx supabase secrets set NOTIFY_EMAIL=you@example.com
-npx supabase secrets set "NOTIFY_FROM=FormFlow <billing@yourdomain.com>"
+npx supabase secrets set "NOTIFY_FROM=HumMotion <billing@yourdomain.com>"
 npx supabase secrets set CRON_SECRET=paste-a-long-random-value
 
 npx supabase functions deploy create-checkout
 npx supabase functions deploy create-portal
 npx supabase functions deploy stripe-webhook --no-verify-jwt
 npx supabase functions deploy trial-reminders --no-verify-jwt
+npx supabase functions deploy request-account-deletion
+npx supabase functions deploy confirm-account-deletion --no-verify-jwt
 ```
 
 For `CRON_SECRET`, use any long random value, such as a password from a password manager. Keep it handy for step 6.
 
-`--no-verify-jwt` is required for the last two functions. Stripe and the daily job can't sign in to Supabase. The webhook checks Stripe's signature instead, and the reminders check `CRON_SECRET`.
+`--no-verify-jwt` is required for `stripe-webhook`, `trial-reminders` and `confirm-account-deletion`, because their callers aren't signed in to Supabase. The webhook checks Stripe's signature, the reminders check `CRON_SECRET`, and account deletion checks the one-time link from the email.
+
+Account deletion emails, like trial reminders, go to customers, so they need `NOTIFY_FROM` (step 3).
 
 ## 5. Connect Stripe to the webhook
 
@@ -149,4 +154,5 @@ If something fails, the error details are in **Supabase > Edge Functions > (func
 - **Demo codes:** each demo visitor gets their own code, such as `DEMO-3F9A1C27`. Each code works once. It takes 50% off for as long as that subscription lasts, including after switching plans in the portal. A code is only used up once checkout completes, so an abandoned checkout doesn't waste it.
 - **Reminder emails:** owners and admins get one 7 days before the trial ends, one the day before, and one when it ends. Organizations that have subscribed get none.
 - **Alert email:** sent once each time a code is used. If Resend is down, Stripe retries the webhook and the email goes out later.
+- **Deleting an account:** Settings > Delete account emails a one-time link that expires in 24 hours, and nothing is deleted until the person opens it and confirms. If they're their organization's only member, the organization, its records and files go too, and any subscription is canceled at once. If they're on a team, they leave it and their records stay. The only owner of a team must make someone else an owner first.
 - **Who can pay:** only owners and admins. Billing belongs to the organization, so the whole team shares one subscription.

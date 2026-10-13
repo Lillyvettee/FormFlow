@@ -222,7 +222,7 @@ export default function FeedbackPage() {
         </div>
         <h2 className="text-2xl font-serif font-bold">Thank you</h2>
         <p className="text-muted-foreground">
-          Your feedback has been received. We read every submission and use it to improve FormFlow. We'll reply to{" "}
+          Your feedback has been received. We read every submission and use it to improve HumMotion. We'll reply to{" "}
           <span className="font-medium text-foreground">{trimmedEmail}</span> if we need more details.
         </p>
         <Button variant="outline" onClick={resetForm}>

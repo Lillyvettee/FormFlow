@@ -1,5 +1,5 @@
 // ============================================================
-// FormFlow - Database Types
+// HumMotion - Database Types
 // Keep in sync with supabase/migrations/001_initial_schema.sql
 // ============================================================
 

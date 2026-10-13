@@ -1,7 +1,7 @@
 /**
  * SettingsPage
  *
- * Settings for the signed-in user and their organization, in five sections:
+ * Settings for the signed-in user and their organization, in six sections:
  *   1. Profile    the user's full name (Supabase Auth user metadata)
  *   2. Password   change password, after confirming the current one
  *   3. Branding   the organization's logo and theme color, stored in
@@ -9,6 +9,7 @@
  *                 Everyone can see it; only owners and admins can change it.
  *   4. Plan       free trial, subscription and checkout (PlanSection)
  *   5. Account    email, organization, role and sign out
+ *   6. Delete account (DeleteAccountSection; confirmed by email)
  *
  * Team accounts:
  *   The organization NAME has one home: the organizations table, edited on
@@ -34,6 +35,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { useOrganization, ROLE_LABELS } from "@/hooks/use-organization";
 import { PlanSection } from "@/components/plan-section";
+import { DeleteAccountSection } from "@/components/delete-account-section";
 import { supabase } from "@/lib/supabase";
 import { PASSWORD_RULES } from "@/lib/password-rules";
 import {
@@ -856,6 +858,9 @@ export default function SettingsPage() {
           </div>
         </div>
       </Card>
+
+      {/* ===== Delete account ===== */}
+      <DeleteAccountSection />
     </div>
   );
 }

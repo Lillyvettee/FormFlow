@@ -123,7 +123,8 @@ export default function PrivacyPage() {
           <li>Account information is kept while your account exists.</li>
           <li>
             Customer Content is kept while the organization exists, including after a trial or subscription ends, when
-            the organization becomes read-only. It's deleted when the organization's owner asks us to delete it.
+            the organization becomes read-only. It's deleted when the organization's owner asks us to delete it, or
+            when the organization's only member deletes their account.
           </li>
           <li>Deleted data may remain in backups for a limited time before being overwritten.</li>
           <li>We keep billing records as long as tax and accounting laws require.</li>
@@ -148,7 +149,8 @@ export default function PrivacyPage() {
           <li>Object to or limit certain uses of your information.</li>
         </ul>
         <p>
-          You can view and update much of your information in the app, and export your organization's data. For anything
+          You can view and update much of your information in the app, export your organization's data, and delete your
+          account under Settings &gt; Delete account (we email you a link to confirm). For anything
           else, email <ContactEmail />. We'll respond within 30 days, or sooner if the law requires. We may need to
           confirm your identity first. We won't treat you differently for exercising these rights.
         </p>

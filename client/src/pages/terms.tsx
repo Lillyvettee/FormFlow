@@ -134,7 +134,9 @@ export default function TermsPage() {
         </p>
         <p>
           We don't delete your data because a trial or subscription ended. An organization owner can ask us to delete
-          it at any time by emailing <ContactEmail />.
+          it at any time by emailing <ContactEmail />. You can also delete your own account under Settings &gt; Delete
+          account. If you're your organization's only member, that deletes the organization and its content too and
+          cancels any subscription; otherwise the content you created stays with your organization.
         </p>
       </Section>
 

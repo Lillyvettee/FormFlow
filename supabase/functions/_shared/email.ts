@@ -3,7 +3,7 @@
 //
 // Secrets:
 //   RESEND_API_KEY   re_...
-//   NOTIFY_FROM      the sender, e.g. "FormFlow <billing@yourdomain.com>".
+//   NOTIFY_FROM      the sender, e.g. "HumMotion <billing@yourdomain.com>".
 //                    Optional for alerts to yourself; required for emails
 //                    to customers (see hasCustomerSender).
 // ============================================================
@@ -11,7 +11,7 @@
 import { requireEnv } from "./billing.ts";
 
 /** Resend's shared test sender. It can only deliver to the Resend account's own address. */
-const TEST_SENDER = "FormFlow <onboarding@resend.dev>";
+const TEST_SENDER = "HumMotion <onboarding@resend.dev>";
 
 /**
  * Whether emails can go to customers. The test sender only reaches your own

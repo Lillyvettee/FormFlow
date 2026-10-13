@@ -1,9 +1,9 @@
 // ============================================================
-// FormFlow - Stripe Integration
+// HumMotion - Stripe Integration
 // Uses Supabase Edge Functions for server-side Stripe calls
 // ============================================================
 
-import { supabase } from '@/lib/supabase'
+import { callFunction } from '@/lib/functions'
 import { PLAN_CONFIG, type Plan, type BillingCycle } from '@/types/database'
 
 // ============================================================
@@ -47,20 +47,12 @@ export function isFeatureAvailable(plan: Plan, feature: 'customBranding' | 'file
 /** Paid plans. Starter is billed monthly, Mission yearly. */
 export type PaidPlan = 'starter' | 'mission'
 
-/**
- * Calls an Edge Function and returns its { url }. Functions report problems
- * as { error: "message" } with a non-2xx status; supabase-js hides that body
- * behind a generic message, so it is read back out here.
- */
+const BILLING_UNAVAILABLE = 'Billing is unavailable right now. Please try again.'
+
+/** Calls a billing Edge Function and returns its { url }. */
 async function invokeForUrl(name: string, body: object): Promise<{ url: string }> {
-  const { data, error } = await supabase.functions.invoke(name, { body })
-
-  if (error) {
-    const message = await error.context?.json?.().then((b: { error?: string }) => b?.error).catch(() => null)
-    throw new Error(message || 'Billing is unavailable right now. Please try again.')
-  }
-  if (!data?.url) throw new Error('Billing is unavailable right now. Please try again.')
-
+  const data = await callFunction<{ url?: string }>(name, body, BILLING_UNAVAILABLE)
+  if (!data?.url) throw new Error(BILLING_UNAVAILABLE)
   return { url: data.url }
 }
 

@@ -47,8 +47,6 @@ import {
 
 /**
  * Product name, used everywhere on this page.
- * Note: the login, feedback and report pages say "FormFlow" while this page
- * says "HumMotion". Pick one and update those pages to match.
  */
 const APP_NAME = "HumMotion";
 

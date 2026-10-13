@@ -61,7 +61,7 @@ export function DemoBanner() {
       <p className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
         <span className="flex items-center gap-2">
           <Info className="h-4 w-4 shrink-0" aria-hidden="true" />
-          You're trying FormFlow with a demo account.
+          You're trying HumMotion with a demo account.
         </span>
         <a href="/signup" className="font-medium text-primary underline underline-offset-4 hover:no-underline">
           Create a free account

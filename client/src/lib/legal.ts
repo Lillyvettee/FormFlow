@@ -11,9 +11,9 @@
 
 export const LEGAL = {
   /** Product name used in the page headers and text. */
-  appName: "FormFlow", // TODO: confirm; the landing page currently says "HumMotion"
+  appName: "HumMotion",
   /** The legal entity that provides the service and signs the terms. */
-  companyName: "FormFlow", // TODO: your legal business name, e.g. "Big State Electric LTD"
+  companyName: "HumMotion", // TODO: your legal business name, e.g. "Big State Electric LTD"
   /** Where people send questions, privacy requests and refund requests. */
   contactEmail: "support@example.com", // TODO: a real inbox someone reads
   /** Postal address. Required by some states; leave "" to hide it. */

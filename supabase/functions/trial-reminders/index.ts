@@ -43,7 +43,7 @@ function emailFor(stage: Stage, orgName: string, trialEndsAt: string) {
 
   if (stage === "ended") {
     return {
-      subject: `Your FormFlow trial has ended`,
+      subject: `Your HumMotion trial has ended`,
       text: [
         `The free trial for ${orgName} ended on ${endDate}.`,
         "",
@@ -56,7 +56,7 @@ function emailFor(stage: Stage, orgName: string, trialEndsAt: string) {
 
   const when = stage === "1d" ? "tomorrow" : "in 7 days";
   return {
-    subject: `Your FormFlow trial ends ${when}`,
+    subject: `Your HumMotion trial ends ${when}`,
     text: [
       `The free trial for ${orgName} ends ${when}, on ${endDate}.`,
       "",

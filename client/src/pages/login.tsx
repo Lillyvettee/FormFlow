@@ -248,7 +248,7 @@ export default function LoginPage() {
           <h1 className="text-2xl font-serif font-bold" data-testid="text-login-title">
             Welcome back
           </h1>
-          <p className="text-muted-foreground text-sm">Sign in to your FormFlow account</p>
+          <p className="text-muted-foreground text-sm">Sign in to your HumMotion account</p>
         </div>
 
         {/* ===== Form ===== */}
