@@ -438,7 +438,7 @@ export default function SignupPage() {
                 <Label htmlFor="first-name">First name</Label>
                 <Input
                   id="first-name"
-                  placeholder="Jane"
+                  placeholder="First name"
                   value={firstName}
                   onChange={(e) => setFirstName(e.target.value)}
                   autoComplete="given-name"
@@ -450,7 +450,7 @@ export default function SignupPage() {
                 <Label htmlFor="last-name">Last name</Label>
                 <Input
                   id="last-name"
-                  placeholder="Doe"
+                  placeholder="Last name"
                   value={lastName}
                   onChange={(e) => setLastName(e.target.value)}
                   autoComplete="family-name"
