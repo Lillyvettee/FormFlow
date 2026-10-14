@@ -44,7 +44,6 @@ export interface OrganizationBilling {
   plan: "starter" | "mission" | null;
   current_period_end: string | null;
   cancel_at_period_end: boolean;
-  discount_code: string | null;
 }
 
 /** From organization_settings. Either may be null if never set. */
@@ -150,7 +149,7 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
       const { data, error: fetchError } = await supabase
         .from("organization_members")
         .select(
-          "role, organization:organizations(id, name, billing:organization_billing(trial_ends_at, status, plan, current_period_end, cancel_at_period_end, discount_code), settings:organization_settings(primary_color, logo_url))",
+          "role, organization:organizations(id, name, billing:organization_billing(trial_ends_at, status, plan, current_period_end, cancel_at_period_end), settings:organization_settings(primary_color, logo_url))",
         )
         .eq("user_id", user.id)
         .maybeSingle();

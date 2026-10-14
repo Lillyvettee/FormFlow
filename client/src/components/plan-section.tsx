@@ -2,11 +2,8 @@
  * PlanSection
  *
  * The Plan card on the Settings page: trial or subscription status, the two
- * plans with "Choose" buttons, a field for a demo discount code, and a
- * "Manage billing" link to Stripe once subscribed.
- *
- * The code field is filled in automatically if this browser was used for
- * the old guest demo.
+ * plans with "Choose" buttons, and a "Manage billing" link to Stripe once
+ * subscribed. Promotion codes are entered on Stripe's checkout page.
  *
  * Only owners and admins can subscribe or manage billing (the Edge Functions
  * enforce this too). Everyone else sees the status and who to ask.
@@ -19,23 +16,17 @@
 import { useEffect, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useOrganization } from "@/hooks/use-organization";
 import { createBillingPortalSession, createCheckoutSession, type PaidPlan } from "@/lib/stripe";
 import { Crown, Check, AlertCircle, ExternalLink } from "lucide-react";
 
-/** Where the old guest demo saved its discount code in this browser. */
-const DEMO_CODE_STORAGE_KEY = "formflow-demo-code";
-
 /** Pricing shown here. Keep in sync with the Pricing section on the landing page and the Stripe prices. */
 const PLANS: {
   id: PaidPlan;
   name: string;
   price: string;
-  discountedPrice: string;
   billing: string;
   badge: string | null;
   features: string[];
@@ -44,7 +35,6 @@ const PLANS: {
     id: "starter",
     name: "Starter",
     price: "$5",
-    discountedPrice: "$2.50",
     billing: "Billed monthly",
     badge: null,
     features: ["Unlimited forms", "Impact reports", "Resource tracking"],
@@ -53,7 +43,6 @@ const PLANS: {
     id: "mission",
     name: "Mission",
     price: "$3",
-    discountedPrice: "$1.50",
     billing: "Billed $36/year",
     badge: "Save 40%",
     features: ["Everything in Starter", "Priority support", "Custom branding"],
@@ -66,15 +55,6 @@ const PLAN_NAMES: Record<PaidPlan, string> = { starter: "Starter", mission: "Mis
 const POLL_ATTEMPTS = 8;
 const POLL_INTERVAL_MS = 2000;
 
-/** A code saved when this browser was used for the old guest demo. */
-const savedDemoCode = (): string => {
-  try {
-    return localStorage.getItem(DEMO_CODE_STORAGE_KEY) ?? "";
-  } catch {
-    return "";
-  }
-};
-
 const formatDate = (iso: string) =>
   new Date(iso).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
 
@@ -83,7 +63,6 @@ export function PlanSection() {
   const { billing, isAdmin, refresh } = useOrganization();
   const { details, isSubscribed, isOnTrial, trialDaysLeft, hasAccess } = billing;
 
-  const [discountCode, setDiscountCode] = useState(savedDemoCode);
   /** The plan whose checkout is starting, or "portal". Disables the buttons meanwhile. */
   const [pending, setPending] = useState<PaidPlan | "portal" | null>(null);
   const [actionError, setActionError] = useState("");
@@ -135,7 +114,7 @@ export function PlanSection() {
     setActionError("");
     try {
       const { url } =
-        action === "portal" ? await createBillingPortalSession() : await createCheckoutSession(action, discountCode);
+        action === "portal" ? await createBillingPortalSession() : await createCheckoutSession(action);
       window.location.href = url;
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Billing is unavailable right now. Please try again.");
@@ -147,15 +126,14 @@ export function PlanSection() {
   let status: { text: string; tone: "default" | "warning" | "error" };
   if (isSubscribed && details?.plan) {
     const name = PLAN_NAMES[details.plan];
-    const discount = details.discount_code ? " with your 50% demo discount" : "";
     if (details.status === "past_due") {
       status = { text: `${name} plan. Your last payment didn't go through; update your card to keep access.`, tone: "error" };
     } else if (details.cancel_at_period_end && details.current_period_end) {
-      status = { text: `${name} plan${discount}, ending ${formatDate(details.current_period_end)}.`, tone: "warning" };
+      status = { text: `${name} plan, ending ${formatDate(details.current_period_end)}.`, tone: "warning" };
     } else if (details.status === "trialing") {
-      status = { text: `${name} plan${discount}. Your free trial continues until ${formatDate(details.trial_ends_at)}; you won't be charged before then.`, tone: "default" };
+      status = { text: `${name} plan. Your free trial continues until ${formatDate(details.trial_ends_at)}; you won't be charged before then.`, tone: "default" };
     } else {
-      status = { text: `${name} plan${discount}.${details.current_period_end ? ` Renews ${formatDate(details.current_period_end)}.` : ""}`, tone: "default" };
+      status = { text: `${name} plan.${details.current_period_end ? ` Renews ${formatDate(details.current_period_end)}.` : ""}`, tone: "default" };
     }
   } else if (isOnTrial && details) {
     status = {
@@ -221,9 +199,6 @@ export function PlanSection() {
                     <span className="text-sm font-normal text-muted-foreground">/mo</span>
                   </p>
                   <p className="text-sm text-muted-foreground mt-2">{plan.billing}</p>
-                  {discountCode.trim() && (
-                    <p className="text-sm text-primary mt-1">{plan.discountedPrice}/mo with a valid demo code</p>
-                  )}
                   <ul className="mt-4 mb-5 space-y-1.5 text-sm">
                     {plan.features.map((feature) => (
                       <li key={feature} className="flex items-center gap-2">
@@ -247,22 +222,7 @@ export function PlanSection() {
             </div>
 
             {isAdmin ? (
-              <div className="space-y-2 max-w-sm">
-                <Label htmlFor="discount-code">Demo discount code (optional)</Label>
-                <Input
-                  id="discount-code"
-                  value={discountCode}
-                  onChange={(e) => setDiscountCode(e.target.value.toUpperCase())}
-                  placeholder="DEMO-XXXXXXXX"
-                  autoComplete="off"
-                  spellCheck={false}
-                  maxLength={20}
-                  aria-describedby="discount-code-help"
-                />
-                <p id="discount-code-help" className="text-xs text-muted-foreground">
-                  From the demo. Takes 50% off for as long as you stay subscribed. Each code works once.
-                </p>
-              </div>
+              <p className="text-sm text-muted-foreground">Have a promo code? You can enter it on the checkout page.</p>
             ) : (
               <p className="text-sm text-muted-foreground">Ask an owner or admin of your organization to choose a plan.</p>
             )}

@@ -56,9 +56,9 @@ async function invokeForUrl(name: string, body: object): Promise<{ url: string }
   return { url: data.url }
 }
 
-/** Start Stripe Checkout. A demo discount code, if given, is checked on the server. */
-export function createCheckoutSession(plan: PaidPlan, discountCode?: string): Promise<{ url: string }> {
-  return invokeForUrl('create-checkout', { plan, discountCode: discountCode?.trim() || undefined })
+/** Start Stripe Checkout. Promotion codes are entered on Stripe's checkout page. */
+export function createCheckoutSession(plan: PaidPlan): Promise<{ url: string }> {
+  return invokeForUrl('create-checkout', { plan })
 }
 
 /** Stripe's billing portal: update card, invoices, switch plan, cancel. */

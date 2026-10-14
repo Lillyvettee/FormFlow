@@ -2,8 +2,7 @@
 // stripe-webhook
 //
 // Stripe calls this when a checkout completes or a subscription changes.
-// It keeps organization_billing in sync, marks demo codes as used, and emails
-// NOTIFY_EMAIL when someone locks in the demo discount.
+// It keeps organization_billing in sync.
 //
 // Deploy with --no-verify-jwt: Stripe has no Supabase login, so every
 // request is verified with the Stripe signature instead.
@@ -15,12 +14,11 @@
 //   customer.subscription.deleted
 //
 // Retries: a failed request returns 500 and Stripe retries it for up to
-// three days. Every step is safe to repeat; the email is sent once.
+// three days. Every step is safe to repeat.
 // ============================================================
 
 import Stripe from "npm:stripe@17.7.0";
 import { admin, json, planForPriceId, requireEnv, serve, stripe } from "../_shared/billing.ts";
-import { sendEmail } from "../_shared/email.ts";
 
 const cryptoProvider = Stripe.createSubtleCryptoProvider();
 
@@ -49,10 +47,6 @@ serve(async (req) => {
         typeof session.subscription === "string" ? session.subscription : session.subscription.id,
       );
       await syncSubscription(subscription);
-
-      const code = session.metadata?.demo_code;
-      const organizationId = session.metadata?.organization_id;
-      if (code && organizationId) await redeemDemoCode(code, organizationId, subscription, event.livemode);
       break;
     }
 
@@ -95,75 +89,4 @@ async function syncSubscription(subscription: Stripe.Subscription) {
     ? await query.eq("organization_id", organizationId)
     : await query.eq("stripe_customer_id", customerId);
   if (error) throw error;
-}
-
-// ------------------------------------------------------------
-// Demo codes
-// ------------------------------------------------------------
-
-async function redeemDemoCode(code: string, organizationId: string, subscription: Stripe.Subscription, livemode: boolean) {
-  // Claim the code. Does nothing if it is already claimed (e.g. a retry).
-  const { error: claimError } = await admin
-    .from("demo_codes")
-    .update({ redeemed_at: new Date().toISOString(), redeemed_by_organization: organizationId })
-    .eq("code", code)
-    .is("redeemed_at", null);
-  if (claimError) throw claimError;
-
-  const { error: billingError } = await admin
-    .from("organization_billing")
-    .update({ discount_code: code })
-    .eq("organization_id", organizationId);
-  if (billingError) throw billingError;
-
-  // Email once, and only for the organization that actually claimed the code.
-  const { data: row, error } = await admin
-    .from("demo_codes")
-    .select("redeemed_by_organization, notified_at")
-    .eq("code", code)
-    .single();
-  if (error) throw error;
-  if (row.redeemed_by_organization !== organizationId || row.notified_at) return;
-
-  await sendLockInEmail(code, organizationId, subscription, livemode);
-
-  const { error: notifiedError } = await admin
-    .from("demo_codes")
-    .update({ notified_at: new Date().toISOString() })
-    .eq("code", code);
-  if (notifiedError) throw notifiedError;
-}
-
-async function sendLockInEmail(code: string, organizationId: string, subscription: Stripe.Subscription, livemode: boolean) {
-  const { data: org } = await admin.from("organizations").select("name").eq("id", organizationId).maybeSingle();
-  const customer = await stripe.customers.retrieve(
-    typeof subscription.customer === "string" ? subscription.customer : subscription.customer.id,
-  );
-  const email = "deleted" in customer && customer.deleted ? "unknown" : (customer.email ?? "unknown");
-
-  const price = subscription.items.data[0]?.price;
-  const plan = planForPriceId(price?.id);
-  const interval = price?.recurring?.interval ?? "period";
-  const fullPrice = (price?.unit_amount ?? 0) / 100;
-  const dashboardUrl = `https://dashboard.stripe.com/${livemode ? "" : "test/"}subscriptions/${subscription.id}`;
-
-  const text = [
-    `${org?.name ?? "An organization"} just locked in the demo discount.`,
-    "",
-    `Contact:   ${email}`,
-    `Plan:      ${plan === "mission" ? "Mission" : plan === "starter" ? "Starter" : "Unknown"}`,
-    `Price:     $${(fullPrice / 2).toFixed(2)}/${interval} (half of $${fullPrice.toFixed(2)})`,
-    `Code:      ${code}`,
-    `Status:    ${subscription.status === "trialing" ? "In free trial, first charge at trial end" : subscription.status}`,
-    livemode ? "" : "Test mode: no real money was charged.",
-    "",
-    `View in Stripe: ${dashboardUrl}`,
-  ].join("\n");
-
-  // Throws on failure, which makes Stripe retry and the email go out later.
-  await sendEmail({
-    to: [requireEnv("NOTIFY_EMAIL")],
-    subject: `${livemode ? "" : "[Test] "}${org?.name ?? "Someone"} locked in 50% off`,
-    text,
-  });
 }

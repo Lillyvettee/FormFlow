@@ -4,24 +4,23 @@
 // Starts a Stripe Checkout for the caller's organization and returns its URL.
 // Called from the Plan section in Settings.
 //
-// Body: { plan: "starter" | "mission", discountCode?: string }
+// Body: { plan: "starter" | "mission" }
 //
 // - Owners and admins only.
 // - Free trial days left over (more than 2) carry into the subscription, so
 //   subscribing early doesn't cost anyone their trial. Stripe needs a trial
 //   end at least 48 hours away.
-// - A demo code applies the 50%-off-forever coupon. The code is only marked
-//   used once payment setup completes (see stripe-webhook), so abandoning
-//   checkout doesn't waste it.
+// - Checkout shows Stripe's "Add promotion code" box. Create codes in the
+//   Stripe dashboard (Product catalog > Coupons); no app changes needed.
 // ============================================================
 
-import { admin, getBillingAdmin, json, priceIdForPlan, requireEnv, returnBaseUrl, serve, stripe, UserError } from "../_shared/billing.ts";
+import { admin, getBillingAdmin, json, priceIdForPlan, returnBaseUrl, serve, stripe, UserError } from "../_shared/billing.ts";
 
 const MIN_TRIAL_SECONDS = 2 * 24 * 60 * 60;
 
 serve(async (req) => {
   const caller = await getBillingAdmin(req);
-  const { plan, discountCode } = await req.json().catch(() => ({}));
+  const { plan } = await req.json().catch(() => ({}));
 
   const priceId = priceIdForPlan(plan);
   if (!priceId) throw new UserError("Choose Starter or Mission.");
@@ -35,16 +34,6 @@ serve(async (req) => {
 
   if (billing.stripe_subscription_id && ["active", "trialing", "past_due"].includes(billing.status)) {
     throw new UserError("Your organization already has a subscription. Use Manage billing to change it.", 409);
-  }
-
-  // ----- Demo discount code -----
-  let code: string | null = null;
-  if (typeof discountCode === "string" && discountCode.trim()) {
-    code = discountCode.trim().toUpperCase();
-    const { data: row, error } = await admin.from("demo_codes").select("redeemed_at").eq("code", code).maybeSingle();
-    if (error) throw error;
-    if (!row) throw new UserError("That discount code isn't valid. Check it for typos.");
-    if (row.redeemed_at) throw new UserError("That discount code has already been used.");
   }
 
   // ----- Stripe customer (one per organization) -----
@@ -67,7 +56,7 @@ serve(async (req) => {
   const trialEnd = Math.floor(new Date(billing.trial_ends_at).getTime() / 1000);
   const keepTrial = trialEnd - Date.now() / 1000 > MIN_TRIAL_SECONDS;
 
-  const metadata = { organization_id: caller.organizationId, demo_code: code ?? "" };
+  const metadata = { organization_id: caller.organizationId };
   const base = returnBaseUrl(req);
 
   const session = await stripe.checkout.sessions.create({
@@ -75,7 +64,7 @@ serve(async (req) => {
     customer: customerId,
     client_reference_id: caller.organizationId,
     line_items: [{ price: priceId, quantity: 1 }],
-    ...(code ? { discounts: [{ coupon: requireEnv("STRIPE_DEMO_COUPON_ID") }] } : {}),
+    allow_promotion_codes: true,
     // Card details are collected now even during a trial, so service continues without interruption.
     payment_method_collection: "always",
     subscription_data: {

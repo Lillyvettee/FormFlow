@@ -6,12 +6,8 @@
 //   STRIPE_SECRET_KEY        sk_test_... or sk_live_...
 //   STRIPE_PRICE_STARTER     price_... for Starter ($5/month)
 //   STRIPE_PRICE_MISSION     price_... for Mission ($36/year)
-//   STRIPE_DEMO_COUPON_ID    the 50%-off, duration "forever" coupon
 //   STRIPE_WEBHOOK_SECRET    whsec_... (stripe-webhook only)
 //   SITE_URL                 e.g. https://your-site.vercel.app
-//   RESEND_API_KEY           re_... (stripe-webhook only)
-//   NOTIFY_EMAIL             where "someone locked in" emails go
-//   NOTIFY_FROM              optional; defaults to Resend's test sender
 //
 // SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY are
 // provided by Supabase automatically.
@@ -98,7 +94,7 @@ export async function getBillingAdmin(req: Request): Promise<Caller> {
   if (userError || !userData.user) throw new UserError("Please sign in again.", 401);
   const user = userData.user;
   if (user.is_anonymous) {
-    throw new UserError("Create a free account to subscribe. Your demo discount code still works.", 403);
+    throw new UserError("Create a free account to subscribe.", 403);
   }
 
   const { data: membership, error } = await admin
