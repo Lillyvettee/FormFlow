@@ -76,6 +76,11 @@ const friendlySignupError = (err: { message?: string; status?: number }): string
   if (msg.includes("already registered") || msg.includes("already exists")) {
     return "An account with this email already exists. Sign in instead, or reset your password if you've forgotten it.";
   }
+  // Project-wide cap on emails per hour, not anything this person did.
+  if (msg.includes("email rate limit")) {
+    return "We can't send confirmation emails right now. Please try again in a little while.";
+  }
+  // Same address asked again within 60 seconds.
   if (err.status === 429 || msg.includes("rate limit") || msg.includes("security purposes")) {
     return "Too many attempts. Please wait a minute and try again.";
   }

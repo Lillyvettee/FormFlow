@@ -64,6 +64,11 @@ const getEmailFromUrl = (): string => {
  */
 const toFriendlyError = (err: { message?: string; status?: number }): string => {
   const msg = err.message?.toLowerCase() ?? "";
+  // Project-wide cap on emails per hour, not anything this person did.
+  if (msg.includes("email rate limit")) {
+    return "We're sending a lot of emails right now. Please try again in a little while.";
+  }
+  // Same address asked again within 60 seconds.
   if (err.status === 429 || msg.includes("rate limit") || msg.includes("security purposes")) {
     return "Too many reset requests. Please wait a minute and try again.";
   }
