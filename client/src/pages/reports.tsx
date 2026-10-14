@@ -1214,11 +1214,12 @@ export default function ReportsPage() {
 
     w.document.write(`<!DOCTYPE html><html><head>
       <meta charset="utf-8">
-      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com">
+      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Quicksand:wght@300..700&display=swap">
       <title>${h(`HumMotion ${reportLabel} - ${generated}`)}</title>
       <style>
         * { box-sizing: border-box; }
-        body { font-family: Georgia, serif; max-width: 960px; margin: 0 auto; padding: 48px 40px; color: #111; }
+        body { font-family: Quicksand, sans-serif; max-width: 960px; margin: 0 auto; padding: 48px 40px; color: #111; }
         .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #111; padding-bottom: 20px; margin-bottom: 32px; }
         .header h1 { font-size: 30px; margin: 0 0 4px; }
         .header p { margin: 0; color: #555; font-size: 13px; font-style: italic; }
