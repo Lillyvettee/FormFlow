@@ -24,6 +24,7 @@ In the Supabase dashboard, open **SQL Editor** and run each file, in order:
 5. `supabase/migrations/008_sample_data.sql` (the dashboard's "Load sample data" button; removes the old guest demo and its codes)
 6. `supabase/migrations/009_fundraising_goals.sql` (fundraising goals with progress bars on the Reports page)
 7. `supabase/migrations/010_people_outcomes_funder_portals.sql` (People, outcome tracking and funder portals)
+8. `supabase/migrations/011_custom_fields.sql` (Customize fields on Donations, Volunteer hours, Inventory, Links and People)
 
 `005_trial_reminders.sql` comes later, in step 6.
 

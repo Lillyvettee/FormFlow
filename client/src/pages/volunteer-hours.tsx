@@ -11,10 +11,15 @@
  *   - Stats, an optional dollar value per hour, and a chart by volunteer,
  *     activity or month
  *   - CSV exports: full detail, or a summary by activity and volunteer
+ *   - Organizations can rename or hide fields, split names into first and
+ *     last, and add their own fields (lib/tracker-fields.ts)
  *
  * Backend assumptions:
  *   - Columns: id, user_id, volunteer_name, activity, hours (numeric),
  *     date ("YYYY-MM-DD"), notes, created_at.
+ *   - Migration 011 adds custom (jsonb), first_name and last_name. Those are
+ *     only sent when it has been run (fields.isAvailable), so saving still
+ *     works on databases without them.
  *   - Row Level Security limits rows to the user's organization and blocks
  *     changes from viewers. user_id records who logged the entry; it isn't
  *     used for access.
@@ -61,7 +66,21 @@ import {
   FileText,
   AlertCircle,
   AlertTriangle,
+  Upload,
+  X,
 } from "lucide-react";
+import { ImportDialog } from "@/components/import-dialog";
+import { CustomFieldInputs, SplitNameInputs } from "@/components/custom-field-inputs";
+import { CustomizeFieldsButton } from "@/components/customize-fields-dialog";
+import {
+  useTrackerFields,
+  prepareCustomValues,
+  customOf,
+  formatCustomValue,
+  joinName,
+  splitName,
+  type CustomValues,
+} from "@/lib/tracker-fields";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 // ===========================================================================
@@ -78,6 +97,10 @@ interface VolunteerHour {
   date: string;
   notes: string | null;
   created_at: string;
+  /** Values of the organization's own fields (migration 011). */
+  custom?: CustomValues | null;
+  first_name?: string | null;
+  last_name?: string | null;
 }
 
 /** Values in the add/edit dialog. Hours stay a string while typing. */
@@ -86,6 +109,8 @@ interface FormState {
   /** Bulk mode: one volunteer name per line. */
   names: string;
   bulk: boolean;
+  /** Split-name mode: one row per volunteer (exactly one when editing). */
+  people: { first: string; last: string }[];
   activity: string;
   hours: string;
   date: string;
@@ -135,6 +160,7 @@ const emptyForm = (): FormState => ({
   name: "",
   names: "",
   bulk: false,
+  people: [{ first: "", last: "" }],
   activity: "",
   hours: "",
   date: localDateString(),
@@ -148,7 +174,12 @@ const emptyForm = (): FormState => ({
  * strings ("10.5"). The sort compared them as text, so "10" sorted before
  * "9", and the chart/stat code had to remember Number() everywhere.
  */
-const normalizeRow = (r: VolunteerHour): VolunteerHour => ({ ...r, hours: Number(r.hours) || 0 });
+const normalizeRow = (r: VolunteerHour): VolunteerHour => ({
+  ...r,
+  hours: Number(r.hours) || 0,
+  // Can be blank when the organization hides the activity field.
+  activity: r.activity ?? "",
+});
 
 /** Escapes quotes and neutralizes spreadsheet formula injection (=, +, -, @). */
 const csvCell = (v: string | number | null | undefined) => {
@@ -341,14 +372,25 @@ export default function VolunteerHoursPage() {
   const { user } = useAuth();
   const { toast } = useToast();
   const { records, isLoading, error, reload, retry } = useVolunteerHours(user?.id);
+  /** Import window (CSV or Excel). */
+  const [showImport, setShowImport] = useState(false);
   /** False for viewers and for read-only organizations; hides add/edit/delete controls. */
   const { canEdit } = useOrganization();
+  /** The organization's field names, hidden fields, split names and own fields. */
+  const fields = useTrackerFields("volunteer_hours");
+  const showActivity = fields.shows("activity");
+  const showNotes = fields.shows("notes");
 
   // ----- Dialog / form -----
   const [showDialog, setShowDialog] = useState(false);
   const [editingRecord, setEditingRecord] = useState<VolunteerHour | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm());
   const [formError, setFormError] = useState<string | null>(null);
+  /** Values of the organization's own fields, applied to every row a save creates. */
+  const [customValues, setCustomValues] = useState<CustomValues>({});
+  const [customErrors, setCustomErrors] = useState<Record<string, string>>({});
+  /** Split-name mode: mark blank first/last rows after a save attempt. */
+  const [showNameErrors, setShowNameErrors] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<VolunteerHour | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -368,6 +410,9 @@ export default function VolunteerHoursPage() {
 
   const today = localDateString();
   const setField = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((f) => ({ ...f, [k]: v }));
+  /** Change one first/last row in split-name mode. */
+  const setPerson = (i: number, patch: Partial<FormState["people"][number]>) =>
+    setForm((f) => ({ ...f, people: f.people.map((p, j) => (j === i ? { ...p, ...patch } : p)) }));
 
   // Save the hourly value whenever it changes.
   useEffect(() => {
@@ -405,19 +450,33 @@ export default function VolunteerHoursPage() {
     [records],
   );
 
-  /** Records matching every active filter. Volunteer matching ignores case and spacing. */
+  /**
+   * Records matching every active filter. Volunteer matching ignores case and spacing.
+   * Search covers the visible fields and the organization's own fields; a
+   * leftover activity filter is ignored once the activity field is hidden.
+   */
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const volunteerKey = volunteerFilter ? nameKey(volunteerFilter) : "";
+    const activityOn = showActivity ? activityFilter : "";
     return records.filter((r) => {
       if (volunteerKey && nameKey(r.volunteer_name) !== volunteerKey) return false;
-      if (activityFilter && r.activity !== activityFilter) return false;
+      if (activityOn && r.activity !== activityOn) return false;
       if (from && r.date < from) return false; // ISO date strings compare correctly as text
       if (to && r.date > to) return false;
-      if (q && !`${r.volunteer_name} ${r.activity} ${r.notes ?? ""}`.toLowerCase().includes(q)) return false;
+      if (q) {
+        const values = customOf(r);
+        const text = [
+          r.volunteer_name,
+          showActivity ? r.activity : "",
+          showNotes ? (r.notes ?? "") : "",
+          ...fields.custom.map((f) => formatCustomValue(f, values[f.id])),
+        ].join(" ");
+        if (!text.toLowerCase().includes(q)) return false;
+      }
       return true;
     });
-  }, [records, search, volunteerFilter, activityFilter, from, to]);
+  }, [records, search, volunteerFilter, activityFilter, from, to, showActivity, showNotes, fields.custom]);
 
   /** Filtered records in the chosen order. Ties fall back to newest first. */
   const sorted = useMemo(() => {
@@ -458,6 +517,9 @@ export default function VolunteerHoursPage() {
   const rate = parseFloat(rateStr);
   const estimatedValue = Number.isFinite(rate) && rate > 0 ? stats.total * rate : null;
 
+  /** The activity chart is unavailable while the activity field is hidden. */
+  const effectiveChartView: ChartView = chartView === "activity" && !showActivity ? "volunteer" : chartView;
+
   /**
    * Chart rows for the selected view.
    * - Volunteers / Activities: top 10 by hours.
@@ -472,7 +534,7 @@ export default function VolunteerHoursPage() {
       hours: round2(hours),
     });
 
-    if (chartView === "month") {
+    if (effectiveChartView === "month") {
       const byMonth = sumBy(filtered, (r) => r.date.slice(0, 7), (r) => r.hours);
       const keys = Object.keys(byMonth).sort();
       if (!keys.length) return [];
@@ -481,19 +543,19 @@ export default function VolunteerHoursPage() {
     }
 
     const byKey =
-      chartView === "volunteer"
+      effectiveChartView === "volunteer"
         ? sumBy(filtered, (r) => cleanName(r.volunteer_name), (r) => r.hours)
         : sumBy(filtered, (r) => r.activity, (r) => r.hours);
     return Object.entries(byKey)
       .map(([k, v]) => toRow(k, k, v))
       .sort((a, b) => b.hours - a.hours)
       .slice(0, 10);
-  }, [filtered, chartView]);
+  }, [filtered, effectiveChartView]);
 
   /** Taller chart when there are more horizontal bars, so labels do not overlap. */
-  const chartHeight = chartView === "month" ? 208 : Math.max(160, chartData.length * 32 + 40);
+  const chartHeight = effectiveChartView === "month" ? 208 : Math.max(160, chartData.length * 32 + 40);
 
-  const hasFilters = !!(search || volunteerFilter || activityFilter || from || to);
+  const hasFilters = !!(search || volunteerFilter || (showActivity && activityFilter) || from || to);
   const clearFilters = () => {
     setSearch("");
     setVolunteerFilter("");
@@ -506,45 +568,61 @@ export default function VolunteerHoursPage() {
   // Form helpers
   // -------------------------------------------------------------------------
 
+  /** Split-name rows in use: always exactly one when editing. */
+  const personRows = useMemo(
+    () => (editingRecord ? form.people.slice(0, 1) : form.people),
+    [editingRecord, form.people],
+  );
+
   /**
-   * Names entered in the dialog.
+   * Volunteers entered in the dialog, with the full name and its first/last parts.
    * Bulk mode splits on new lines only. The original also split on commas,
    * so a name typed as "Lee, Sam" became two volunteers, "Lee" and "Sam".
+   * In split-name mode each first/last row is one volunteer.
    * Duplicates are removed ignoring case.
    */
-  const enteredNames = useMemo(() => {
-    const raw = form.bulk && !editingRecord ? form.names.split(/\r?\n/) : [form.name];
+  const enteredPeople = useMemo(() => {
+    const raw: { first: string; last: string }[] = fields.splitNames
+      ? personRows.map((p) => ({ first: cleanName(p.first), last: cleanName(p.last) }))
+      : (form.bulk && !editingRecord ? form.names.split(/\r?\n/) : [form.name]).map((n) => splitName(cleanName(n)));
     const seen = new Set<string>();
-    const out: string[] = [];
-    for (const n of raw.map(cleanName).filter(Boolean)) {
-      if (seen.has(n.toLowerCase())) continue;
-      seen.add(n.toLowerCase());
-      out.push(n);
+    const out: { name: string; first: string; last: string }[] = [];
+    for (const p of raw) {
+      const name = joinName(p.first, p.last);
+      if (!name || seen.has(name.toLowerCase())) continue;
+      seen.add(name.toLowerCase());
+      out.push({ name, ...p });
     }
     return out;
-  }, [form.bulk, form.names, form.name, editingRecord]);
+  }, [fields.splitNames, personRows, form.bulk, form.names, form.name, editingRecord]);
+
+  const enteredNames = useMemo(() => enteredPeople.map((p) => p.name), [enteredPeople]);
 
   /**
    * Existing entries with the same volunteer, activity and date as what is
    * being entered. Shown as a heads-up, since logging the same shift twice is
    * an easy mistake when several people share data entry. Saving is still allowed.
+   * With the activity field hidden, volunteer and date are compared.
    */
   const possibleDuplicates = useMemo(() => {
-    if (!form.date || !form.activity.trim()) return [];
+    if (!form.date || (showActivity && !form.activity.trim())) return [];
     const activity = form.activity.trim().toLowerCase();
     const names = new Set(enteredNames.map((n) => n.toLowerCase()));
     return records.filter(
       (r) =>
         r.id !== editingRecord?.id &&
         r.date === form.date &&
-        r.activity.toLowerCase() === activity &&
+        (!showActivity || r.activity.toLowerCase() === activity) &&
         names.has(nameKey(r.volunteer_name)),
     );
-  }, [records, form.date, form.activity, enteredNames, editingRecord]);
+  }, [records, form.date, form.activity, enteredNames, editingRecord, showActivity]);
 
   const resetForm = () => {
     setForm(emptyForm());
     setFormError(null);
+    setCustomValues({});
+    setCustomErrors({});
+    setShowNameErrors(false);
     setEditingRecord(null);
     setShowDialog(false);
   };
@@ -553,22 +631,36 @@ export default function VolunteerHoursPage() {
   const openCreate = () => {
     setForm(emptyForm());
     setFormError(null);
+    setCustomValues({});
+    setCustomErrors({});
+    setShowNameErrors(false);
     setEditingRecord(null);
     setShowDialog(true);
   };
 
-  /** Open the dialog pre-filled with an existing entry. */
+  /**
+   * Open the dialog pre-filled with an existing entry. Entries saved before
+   * names were split get their first/last name guessed from the full name.
+   */
   const openEdit = (r: VolunteerHour) => {
     setEditingRecord(r);
     setForm({
       ...emptyForm(),
       name: r.volunteer_name,
+      people: [
+        r.first_name != null || r.last_name != null
+          ? { first: r.first_name ?? "", last: r.last_name ?? "" }
+          : splitName(r.volunteer_name),
+      ],
       activity: r.activity,
       hours: String(r.hours),
       date: r.date,
       notes: r.notes ?? "",
     });
     setFormError(null);
+    setCustomValues({ ...customOf(r) });
+    setCustomErrors({});
+    setShowNameErrors(false);
     setShowDialog(true);
   };
 
@@ -577,50 +669,74 @@ export default function VolunteerHoursPage() {
   // -------------------------------------------------------------------------
 
   /**
-   * Validate and save. Creates one row per name in bulk mode.
+   * Validate and save. Creates one row per name in bulk mode (or per
+   * first/last row in split-name mode); custom field values apply to every row.
    * Names are cleaned (trimmed, single spaces) and, when they match an
    * existing volunteer ignoring case, use that volunteer's existing spelling
-   * so one person does not end up listed under two names.
+   * so one person does not end up listed under two names. Split names are
+   * saved as typed, so the full name always matches its first/last parts.
+   * Hidden fields are left out of the payload, so an edit keeps their values.
    */
   const handleSave = async () => {
     if (!user || isSaving) return;
     const h = parseFloat(form.hours);
 
+    if (fields.splitNames && personRows.some((p) => !joinName(p.first, p.last))) {
+      setShowNameErrors(true);
+      return setFormError(
+        personRows.length > 1 ? "Enter a first or last name for each volunteer." : "Enter a first or last name.",
+      );
+    }
     if (enteredNames.length === 0)
       return setFormError(form.bulk ? "Enter at least one volunteer name." : "Enter the volunteer's name.");
-    if (!form.activity.trim()) return setFormError("Enter an activity.");
+    if (showActivity && !form.activity.trim()) return setFormError(`Enter ${fields.label("activity").toLowerCase()}.`);
     if (!Number.isFinite(h) || h <= 0) return setFormError("Hours must be a number greater than 0.");
     if (h > MAX_HOURS_PER_ENTRY) return setFormError(`An entry can't exceed ${MAX_HOURS_PER_ENTRY} hours.`);
     if (!form.date || form.date > today) return setFormError("Choose a date that is today or earlier.");
 
-    // Map typed names onto existing spellings where they match.
+    const custom = prepareCustomValues(fields.custom, customValues);
+    setCustomErrors(custom.errors);
+    if (Object.keys(custom.errors).length > 0) return setFormError("Check the highlighted fields.");
+
+    // Map typed names onto existing spellings where they match (single-name mode).
     const existingByKey = new Map(volunteerNames.map((n) => [nameKey(n), n]));
-    const names = enteredNames.map((n) => existingByKey.get(nameKey(n)) ?? n);
+    const people = fields.splitNames
+      ? enteredPeople
+      : enteredPeople.map((p) => {
+          const name = existingByKey.get(nameKey(p.name)) ?? p.name;
+          return { name, ...splitName(name) };
+        });
     const existingActivity = activities.find((a) => a.toLowerCase() === form.activity.trim().toLowerCase());
 
     setFormError(null);
     setIsSaving(true);
     try {
       const base = {
-        activity: existingActivity ?? form.activity.trim(),
+        ...(showActivity ? { activity: existingActivity ?? form.activity.trim() } : {}),
         hours: round2(h),
         date: form.date,
-        notes: form.notes.trim() || null,
+        ...(showNotes ? { notes: form.notes.trim() || null } : {}),
+        // Columns from migration 011 are only sent once it has been run.
+        ...(fields.isAvailable ? { custom: custom.values } : {}),
       };
+      const nameColumns = (p: (typeof people)[number]) => ({
+        volunteer_name: p.name,
+        ...(fields.isAvailable ? { first_name: p.first || null, last_name: p.last || null } : {}),
+      });
 
       if (editingRecord) {
         const { error: updateError } = await supabase
           .from("volunteer_hours")
-          .update({ ...base, volunteer_name: names[0] })
+          .update({ ...base, ...nameColumns(people[0]) })
           .eq("id", editingRecord.id);
         if (updateError) throw updateError;
         toast({ title: "Entry updated" });
       } else {
         const { error: insertError } = await supabase
           .from("volunteer_hours")
-          .insert(names.map((volunteer_name) => ({ ...base, volunteer_name, user_id: user.id })));
+          .insert(people.map((p) => ({ ...base, ...nameColumns(p), user_id: user.id })));
         if (insertError) throw insertError;
-        toast({ title: names.length > 1 ? `${names.length} entries logged` : "Hours logged" });
+        toast({ title: people.length > 1 ? `${people.length} entries logged` : "Hours logged" });
       }
       resetForm();
       reload();
@@ -680,8 +796,22 @@ export default function VolunteerHoursPage() {
   const exportDetail = () => {
     downloadCSV(
       [
-        ["Volunteer", "Activity", "Hours", "Date", "Notes"],
-        ...sorted.map((r) => [r.volunteer_name, r.activity, r.hours, r.date, r.notes ?? ""]),
+        [
+          fields.label("volunteer_name"),
+          ...(showActivity ? [fields.label("activity")] : []),
+          fields.label("hours"),
+          fields.label("date"),
+          ...(showNotes ? [fields.label("notes")] : []),
+          ...fields.custom.map((f) => f.label),
+        ],
+        ...sorted.map((r) => [
+          r.volunteer_name,
+          ...(showActivity ? [r.activity] : []),
+          r.hours,
+          r.date,
+          ...(showNotes ? [r.notes ?? ""] : []),
+          ...fields.custom.map((f) => formatCustomValue(f, customOf(r)[f.id])),
+        ]),
       ],
       `volunteer-hours${rangeLabel}.csv`,
     );
@@ -709,7 +839,7 @@ export default function VolunteerHoursPage() {
         : []),
       [],
       ["Type", "Name", "Hours", "Entries"],
-      ...entries((r) => r.activity).map(([k, h, c]) => ["Activity", k, h, c]),
+      ...(showActivity ? entries((r) => r.activity).map(([k, h, c]) => [fields.label("activity"), k, h, c]) : []),
       ...entries((r) => cleanName(r.volunteer_name)).map(([k, h, c]) => ["Volunteer", k, h, c]),
     ];
     downloadCSV(rows, `volunteer-summary${rangeLabel}.csv`);
@@ -742,7 +872,7 @@ export default function VolunteerHoursPage() {
     { label: "Entries", value: stats.entries },
   ];
 
-  const isBulk = form.bulk && !editingRecord;
+  const isBulk = !editingRecord && (fields.splitNames ? form.people.length > 1 : form.bulk);
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
@@ -764,13 +894,20 @@ export default function VolunteerHoursPage() {
               </Button>
             </>
           )}
+          <CustomizeFieldsButton fields={fields} />
           {canEdit && (
-            <Button onClick={openCreate}>
-              <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Log hours
-            </Button>
+            <>
+              <Button variant="outline" onClick={() => setShowImport(true)}>
+                <Upload className="mr-1 h-4 w-4" aria-hidden="true" /> Import
+              </Button>
+              <Button onClick={openCreate}>
+                <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Log hours
+              </Button>
+            </>
           )}
         </div>
       </div>
+      {showImport && <ImportDialog kind="volunteer_hours" onClose={() => setShowImport(false)} onImported={reload} />}
       <ReadOnlyNotice />
 
       {/* ===== Load error ===== */}
@@ -796,14 +933,14 @@ export default function VolunteerHoursPage() {
               </Label>
               <Input
                 id="vh-search"
-                placeholder="Name, activity, or notes"
+                placeholder={showActivity && showNotes ? "Name, activity, or notes" : "Search entries"}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
             <div className="space-y-1">
               <Label htmlFor="vh-volunteer" className="text-xs">
-                Volunteer
+                {fields.label("volunteer_name")}
               </Label>
               <select
                 id="vh-volunteer"
@@ -819,24 +956,26 @@ export default function VolunteerHoursPage() {
                 ))}
               </select>
             </div>
-            <div className="space-y-1">
-              <Label htmlFor="vh-activity" className="text-xs">
-                Activity
-              </Label>
-              <select
-                id="vh-activity"
-                className={selectClass}
-                value={activityFilter}
-                onChange={(e) => setActivityFilter(e.target.value)}
-              >
-                <option value="">All</option>
-                {activities.map((a) => (
-                  <option key={a} value={a}>
-                    {a}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {showActivity && (
+              <div className="space-y-1">
+                <Label htmlFor="vh-activity" className="text-xs">
+                  {fields.label("activity")}
+                </Label>
+                <select
+                  id="vh-activity"
+                  className={selectClass}
+                  value={activityFilter}
+                  onChange={(e) => setActivityFilter(e.target.value)}
+                >
+                  <option value="">All</option>
+                  {activities.map((a) => (
+                    <option key={a} value={a}>
+                      {a}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="space-y-1">
               <Label htmlFor="vh-from" className="text-xs">
                 From
@@ -922,25 +1061,27 @@ export default function VolunteerHoursPage() {
           <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <h2 className="font-semibold flex items-center gap-2">
               <Users className="h-4 w-4 text-primary" aria-hidden="true" />
-              {chartView === "volunteer"
+              {effectiveChartView === "volunteer"
                 ? "Top volunteers by hours"
-                : chartView === "activity"
-                  ? "Hours by activity"
+                : effectiveChartView === "activity"
+                  ? `Hours by ${fields.label("activity").toLowerCase()}`
                   : "Hours by month"}
             </h2>
             <div className="flex gap-1" role="group" aria-label="Chart view">
               {(
                 [
                   ["volunteer", "Volunteers"],
-                  ["activity", "Activities"],
+                  ["activity", fields.label("activity")],
                   ["month", "Months"],
                 ] as const
-              ).map(([v, label]) => (
+              )
+                .filter(([v]) => v !== "activity" || showActivity)
+                .map(([v, label]) => (
                 <Button
                   key={v}
                   size="sm"
-                  variant={chartView === v ? "default" : "outline"}
-                  aria-pressed={chartView === v}
+                  variant={effectiveChartView === v ? "default" : "outline"}
+                  aria-pressed={effectiveChartView === v}
                   onClick={() => setChartView(v)}
                 >
                   {label}
@@ -950,9 +1091,9 @@ export default function VolunteerHoursPage() {
           </div>
           <div style={{ height: chartHeight }}>
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={chartData} layout={chartView === "month" ? "horizontal" : "vertical"}>
+              <BarChart data={chartData} layout={effectiveChartView === "month" ? "horizontal" : "vertical"}>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                {chartView === "month" ? (
+                {effectiveChartView === "month" ? (
                   <>
                     <XAxis type="category" dataKey="name" tick={AXIS_TICK} />
                     <YAxis type="number" tick={AXIS_TICK} />
@@ -977,7 +1118,7 @@ export default function VolunteerHoursPage() {
                 <Bar
                   dataKey="hours"
                   fill="hsl(var(--primary))"
-                  radius={chartView === "month" ? [4, 4, 0, 0] : [0, 4, 4, 0]}
+                  radius={effectiveChartView === "month" ? [4, 4, 0, 0] : [0, 4, 4, 0]}
                 />
               </BarChart>
             </ResponsiveContainer>
@@ -994,11 +1135,16 @@ export default function VolunteerHoursPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <SortHead k="volunteer_name" label="Volunteer" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortHead k="activity" label="Activity" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortHead k="hours" label="Hours" className="text-right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                  <SortHead k="date" label="Date" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                  <TableHead>Notes</TableHead>
+                  <SortHead k="volunteer_name" label={fields.label("volunteer_name")} sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  {showActivity && (
+                    <SortHead k="activity" label={fields.label("activity")} sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  )}
+                  <SortHead k="hours" label={fields.label("hours")} className="text-right" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  <SortHead k="date" label={fields.label("date")} sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                  {showNotes && <TableHead>{fields.label("notes")}</TableHead>}
+                  {fields.custom.map((f) => (
+                    <TableHead key={f.id}>{f.label}</TableHead>
+                  ))}
                   {canEdit && <TableHead className="w-20">Actions</TableHead>}
                 </TableRow>
               </TableHeader>
@@ -1006,14 +1152,26 @@ export default function VolunteerHoursPage() {
                 {pageRows.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell className="font-medium">{r.volunteer_name}</TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">{r.activity}</Badge>
-                    </TableCell>
+                    {showActivity && (
+                      <TableCell>
+                        <Badge variant="secondary">{r.activity}</Badge>
+                      </TableCell>
+                    )}
                     <TableCell className="text-right font-semibold text-primary tabular-nums">{fmtHours(r.hours)}</TableCell>
                     <TableCell className="whitespace-nowrap">{fmtDate(r.date)}</TableCell>
-                    <TableCell className="max-w-[150px] truncate text-muted-foreground" title={r.notes ?? undefined}>
-                      {r.notes ?? "-"}
-                    </TableCell>
+                    {showNotes && (
+                      <TableCell className="max-w-[150px] truncate text-muted-foreground" title={r.notes ?? undefined}>
+                        {r.notes ?? "-"}
+                      </TableCell>
+                    )}
+                    {fields.custom.map((f) => {
+                      const text = formatCustomValue(f, customOf(r)[f.id]);
+                      return (
+                        <TableCell key={f.id} className="max-w-[150px] truncate" title={text || undefined}>
+                          {text || "-"}
+                        </TableCell>
+                      );
+                    })}
                     {canEdit && (
                       <TableCell>
                         <div className="flex items-center gap-1">
@@ -1128,10 +1286,62 @@ export default function VolunteerHoursPage() {
           >
             <div className="space-y-4 py-2">
               {/* Name(s) */}
-              {isBulk ? (
+              {fields.splitNames ? (
+                // Split names: one first/last row per volunteer. Extra rows log
+                // the same hours for several people (one row when editing).
+                <div className="space-y-3">
+                  {personRows.map((p, i) => (
+                    <div
+                      key={i}
+                      className="flex items-start gap-2"
+                      role="group"
+                      aria-label={personRows.length > 1 ? `Volunteer ${i + 1}` : fields.label("volunteer_name")}
+                    >
+                      <div className="flex-1">
+                        <SplitNameInputs
+                          first={p.first}
+                          last={p.last}
+                          onFirst={(v) => setPerson(i, { first: v })}
+                          onLast={(v) => setPerson(i, { last: v })}
+                          error={showNameErrors && !joinName(p.first, p.last) ? "Enter a first or last name." : null}
+                          idPrefix={`vh-person-${i}`}
+                          autoFocus={i === 0 || i === personRows.length - 1}
+                        />
+                      </div>
+                      {i > 0 && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="mt-7"
+                          aria-label={`Remove volunteer ${i + 1}`}
+                          onClick={() => setField("people", form.people.filter((_, j) => j !== i))}
+                        >
+                          <X className="h-4 w-4" aria-hidden="true" />
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                  {!editingRecord && (
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 text-sm text-primary underline-offset-4 hover:underline rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={() => setField("people", [...form.people, { first: "", last: "" }])}
+                    >
+                      <Plus className="h-3.5 w-3.5" aria-hidden="true" /> Add another volunteer
+                    </button>
+                  )}
+                  {isBulk && enteredNames.length > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      {enteredNames.length} {enteredNames.length === 1 ? "volunteer" : "volunteers"} will be logged.
+                    </p>
+                  )}
+                </div>
+              ) : isBulk ? (
                 <div className="space-y-2">
                   <Label htmlFor="vh-names">
-                    Volunteer names <span className="text-muted-foreground font-normal">(one per line)</span>
+                    {fields.label("volunteer_name")}{" "}
+                    <span className="text-muted-foreground font-normal">(one per line)</span>
                   </Label>
                   <Textarea
                     id="vh-names"
@@ -1149,7 +1359,7 @@ export default function VolunteerHoursPage() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <Label htmlFor="vh-name">Volunteer name</Label>
+                  <Label htmlFor="vh-name">{fields.label("volunteer_name")}</Label>
                   <Input
                     id="vh-name"
                     placeholder="Full name"
@@ -1168,7 +1378,8 @@ export default function VolunteerHoursPage() {
                 </div>
               )}
 
-              {!editingRecord && (
+              {/* Bulk toggle (split-name mode uses "Add another volunteer" instead) */}
+              {!editingRecord && !fields.splitNames && (
                 <button
                   type="button"
                   className="text-sm text-primary underline-offset-4 hover:underline -mt-2 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -1179,28 +1390,30 @@ export default function VolunteerHoursPage() {
               )}
 
               {/* Activity (with suggestions) */}
-              <div className="space-y-2">
-                <Label htmlFor="vh-act">Activity</Label>
-                <Input
-                  id="vh-act"
-                  placeholder="Food distribution, Event setup..."
-                  value={form.activity}
-                  onChange={(e) => setField("activity", e.target.value)}
-                  list="activities"
-                  maxLength={100}
-                  autoComplete="off"
-                />
-                <datalist id="activities">
-                  {activities.map((a) => (
-                    <option key={a} value={a} />
-                  ))}
-                </datalist>
-              </div>
+              {showActivity && (
+                <div className="space-y-2">
+                  <Label htmlFor="vh-act">{fields.label("activity")}</Label>
+                  <Input
+                    id="vh-act"
+                    placeholder="Food distribution, Event setup..."
+                    value={form.activity}
+                    onChange={(e) => setField("activity", e.target.value)}
+                    list="activities"
+                    maxLength={100}
+                    autoComplete="off"
+                  />
+                  <datalist id="activities">
+                    {activities.map((a) => (
+                      <option key={a} value={a} />
+                    ))}
+                  </datalist>
+                </div>
+              )}
 
               {/* Hours and date */}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="vh-hours">{isBulk ? "Hours each" : "Hours"}</Label>
+                  <Label htmlFor="vh-hours">{isBulk ? `${fields.label("hours")} each` : fields.label("hours")}</Label>
                   <Input
                     id="vh-hours"
                     type="number"
@@ -1214,7 +1427,7 @@ export default function VolunteerHoursPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="vh-date">Date</Label>
+                  <Label htmlFor="vh-date">{fields.label("date")}</Label>
                   <Input
                     id="vh-date"
                     type="date"
@@ -1226,18 +1439,29 @@ export default function VolunteerHoursPage() {
               </div>
 
               {/* Notes */}
-              <div className="space-y-2">
-                <Label htmlFor="vh-notes">
-                  Notes <span className="text-muted-foreground font-normal">(optional)</span>
-                </Label>
-                <Textarea
-                  id="vh-notes"
-                  placeholder="Any additional notes..."
-                  value={form.notes}
-                  onChange={(e) => setField("notes", e.target.value)}
-                  maxLength={1000}
-                />
-              </div>
+              {showNotes && (
+                <div className="space-y-2">
+                  <Label htmlFor="vh-notes">
+                    {fields.label("notes")} <span className="text-muted-foreground font-normal">(optional)</span>
+                  </Label>
+                  <Textarea
+                    id="vh-notes"
+                    placeholder="Any additional notes..."
+                    value={form.notes}
+                    onChange={(e) => setField("notes", e.target.value)}
+                    maxLength={1000}
+                  />
+                </div>
+              )}
+
+              {/* The organization's own fields (applied to every volunteer logged) */}
+              <CustomFieldInputs
+                fields={fields.custom}
+                values={customValues}
+                onChange={setCustomValues}
+                errors={customErrors}
+                idPrefix="volunteer-custom"
+              />
 
               {/* Possible duplicate entry (warning only) */}
               {possibleDuplicates.length > 0 && (

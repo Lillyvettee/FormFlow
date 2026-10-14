@@ -11,7 +11,8 @@
  * through it attach to their record. Resetting the token turns old links off.
  *
  * Viewers can see people; owners, admins and members can add and change
- * them (same rules as the other records).
+ * them (same rules as the other records). Owners and admins can rename,
+ * hide and add fields, and split names (Customize fields, migration 011).
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -34,6 +35,18 @@ import { friendlyWriteError } from "@/lib/db-errors";
 import { fetchAll, formatDate, toISODate, answerFields } from "@/lib/report-utils";
 import { newAccessToken, outcomeScore, personalFormLink } from "@/lib/outcomes";
 import { ResponseDialog } from "@/components/reports/form-report";
+import { CustomFieldInputs, SplitNameInputs } from "@/components/custom-field-inputs";
+import { CustomizeFieldsButton } from "@/components/customize-fields-dialog";
+import {
+  customOf,
+  formatCustomValue,
+  joinName,
+  prepareCustomValues,
+  splitName,
+  useTrackerFields,
+  type CustomValues,
+  type TrackerFields,
+} from "@/lib/tracker-fields";
 import { TimeSeriesChart } from "@/components/reports/report-ui";
 import {
   ArrowDownRight,
@@ -79,6 +92,8 @@ function SetupNotice() {
 
 interface Draft {
   full_name: string;
+  first_name: string;
+  last_name: string;
   email: string;
   phone: string;
   program: string;
@@ -90,48 +105,71 @@ interface Draft {
 function PersonDialog({
   person,
   programs,
+  fields,
   onClose,
   onSaved,
 }: {
   person: Person | "new";
   programs: string[];
+  fields: TrackerFields;
   onClose: () => void;
   onSaved: (id: string) => void;
 }) {
   const { toast } = useToast();
-  const [draft, setDraft] = useState<Draft>(() =>
-    person === "new"
-      ? { full_name: "", email: "", phone: "", program: "", status: "active", start_date: toISODate(new Date()), notes: "" }
-      : {
-          full_name: person.full_name,
-          email: person.email ?? "",
-          phone: person.phone ?? "",
-          program: person.program ?? "",
-          status: person.status,
-          start_date: person.start_date,
-          notes: person.notes ?? "",
-        },
-  );
+  const [draft, setDraft] = useState<Draft>(() => {
+    if (person === "new") {
+      return { full_name: "", first_name: "", last_name: "", email: "", phone: "", program: "", status: "active", start_date: toISODate(new Date()), notes: "" };
+    }
+    // Records saved before names were split get a best guess.
+    const guess = splitName(person.full_name);
+    return {
+      full_name: person.full_name,
+      first_name: person.first_name ?? guess.first,
+      last_name: person.last_name ?? guess.last,
+      email: person.email ?? "",
+      phone: person.phone ?? "",
+      program: person.program ?? "",
+      status: person.status,
+      start_date: person.start_date,
+      notes: person.notes ?? "",
+    };
+  });
+  const [customValues, setCustomValues] = useState<CustomValues>(() => (person === "new" ? {} : customOf(person)));
+  const [customErrors, setCustomErrors] = useState<Record<string, string>>({});
   const [showErrors, setShowErrors] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
 
-  const nameError = draft.full_name.trim() ? null : "Enter a name.";
-  const emailError = draft.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.email.trim()) ? "Enter a valid email or leave it blank." : null;
+  const fullName = fields.splitNames ? joinName(draft.first_name, draft.last_name) : draft.full_name.trim();
+  const nameError = fullName ? null : fields.splitNames ? "Enter a first or last name." : "Enter a name.";
+  const emailError =
+    fields.shows("email") && draft.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.email.trim()) ? "Enter a valid email or leave it blank." : null;
 
   const save = async () => {
     setShowErrors(true);
-    if (nameError || emailError || isSaving) return;
+    const prepared = prepareCustomValues(fields.custom, customValues);
+    setCustomErrors(prepared.errors);
+    if (nameError || emailError || Object.keys(prepared.errors).length || isSaving) return;
     setIsSaving(true);
-    const row = {
-      full_name: draft.full_name.trim(),
-      email: draft.email.trim() || null,
-      phone: draft.phone.trim() || null,
-      program: draft.program.trim() || null,
+
+    // Hidden fields are left out, so values saved before they were hidden are kept.
+    const row: Record<string, unknown> = {
+      full_name: fullName,
       status: draft.status,
       start_date: draft.start_date || toISODate(new Date()),
-      notes: draft.notes.trim() || null,
     };
+    if (fields.shows("email")) row.email = draft.email.trim() || null;
+    if (fields.shows("phone")) row.phone = draft.phone.trim() || null;
+    if (fields.shows("program")) row.program = draft.program.trim() || null;
+    if (fields.shows("notes")) row.notes = draft.notes.trim() || null;
+    // Columns from migration 011 are only sent once it has been run.
+    if (fields.isAvailable) {
+      const parts = fields.splitNames ? { first: draft.first_name.trim(), last: draft.last_name.trim() } : splitName(fullName);
+      row.first_name = parts.first || null;
+      row.last_name = parts.last || null;
+      row.custom = prepared.values;
+    }
+
     const res =
       person === "new"
         ? await supabase.from("people").insert(row).select("id").single()
@@ -154,40 +192,60 @@ function PersonDialog({
           <DialogDescription>Someone your organization serves, so you can follow their progress over time.</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="person-name">Full name</Label>
-            <Input id="person-name" value={draft.full_name} onChange={(e) => set({ full_name: e.target.value })} maxLength={150} autoFocus aria-invalid={showErrors && Boolean(nameError)} />
-            {showErrors && nameError && <p className="text-xs text-destructive">{nameError}</p>}
-          </div>
+          {fields.splitNames ? (
+            <SplitNameInputs
+              first={draft.first_name}
+              last={draft.last_name}
+              onFirst={(v) => set({ first_name: v })}
+              onLast={(v) => set({ last_name: v })}
+              error={showErrors ? nameError : null}
+              idPrefix="person-name"
+              autoFocus
+            />
+          ) : (
+            <div className="space-y-1.5">
+              <Label htmlFor="person-name">{fields.label("full_name")}</Label>
+              <Input id="person-name" value={draft.full_name} onChange={(e) => set({ full_name: e.target.value })} maxLength={150} autoFocus aria-invalid={showErrors && Boolean(nameError)} />
+              {showErrors && nameError && <p className="text-xs text-destructive">{nameError}</p>}
+            </div>
+          )}
+          {(fields.shows("email") || fields.shows("phone")) && (
+            <div className="grid sm:grid-cols-2 gap-3">
+              {fields.shows("email") && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="person-email">{fields.label("email")} (optional)</Label>
+                  <Input id="person-email" type="email" value={draft.email} onChange={(e) => set({ email: e.target.value })} aria-invalid={showErrors && Boolean(emailError)} />
+                  {showErrors && emailError && <p className="text-xs text-destructive">{emailError}</p>}
+                </div>
+              )}
+              {fields.shows("phone") && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="person-phone">{fields.label("phone")} (optional)</Label>
+                  <Input id="person-phone" type="tel" value={draft.phone} onChange={(e) => set({ phone: e.target.value })} maxLength={40} />
+                </div>
+              )}
+            </div>
+          )}
           <div className="grid sm:grid-cols-2 gap-3">
+            {fields.shows("program") && (
+              <div className="space-y-1.5">
+                <Label htmlFor="person-program">{fields.label("program")} (optional)</Label>
+                <Input id="person-program" list="person-programs" value={draft.program} onChange={(e) => set({ program: e.target.value })} placeholder="e.g. Youth mentoring" maxLength={120} />
+                <datalist id="person-programs">
+                  {programs.map((p) => (
+                    <option key={p} value={p} />
+                  ))}
+                </datalist>
+              </div>
+            )}
             <div className="space-y-1.5">
-              <Label htmlFor="person-email">Email (optional)</Label>
-              <Input id="person-email" type="email" value={draft.email} onChange={(e) => set({ email: e.target.value })} aria-invalid={showErrors && Boolean(emailError)} />
-              {showErrors && emailError && <p className="text-xs text-destructive">{emailError}</p>}
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="person-phone">Phone (optional)</Label>
-              <Input id="person-phone" type="tel" value={draft.phone} onChange={(e) => set({ phone: e.target.value })} maxLength={40} />
-            </div>
-          </div>
-          <div className="grid sm:grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="person-program">Program (optional)</Label>
-              <Input id="person-program" list="person-programs" value={draft.program} onChange={(e) => set({ program: e.target.value })} placeholder="e.g. Youth mentoring" maxLength={120} />
-              <datalist id="person-programs">
-                {programs.map((p) => (
-                  <option key={p} value={p} />
-                ))}
-              </datalist>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="person-start">Start date</Label>
+              <Label htmlFor="person-start">{fields.label("start_date")}</Label>
               <Input id="person-start" type="date" value={draft.start_date} onChange={(e) => set({ start_date: e.target.value })} />
             </div>
           </div>
           {person !== "new" && (
             <div className="space-y-1.5">
-              <Label htmlFor="person-status">Status</Label>
+              <Label htmlFor="person-status">{fields.label("status")}</Label>
               <Select value={draft.status} onValueChange={(v) => set({ status: v as Person["status"] })}>
                 <SelectTrigger id="person-status">
                   <SelectValue />
@@ -202,11 +260,14 @@ function PersonDialog({
               </Select>
             </div>
           )}
-          <div className="space-y-1.5">
-            <Label htmlFor="person-notes">Notes (optional)</Label>
-            <Textarea id="person-notes" value={draft.notes} onChange={(e) => set({ notes: e.target.value })} maxLength={2000} rows={3} />
-            <p className="text-xs text-muted-foreground">Visible to everyone on your team. Avoid medical or other sensitive details.</p>
-          </div>
+          <CustomFieldInputs fields={fields.custom} values={customValues} onChange={setCustomValues} errors={showErrors ? customErrors : {}} idPrefix="person-custom" />
+          {fields.shows("notes") && (
+            <div className="space-y-1.5">
+              <Label htmlFor="person-notes">{fields.label("notes")} (optional)</Label>
+              <Textarea id="person-notes" value={draft.notes} onChange={(e) => set({ notes: e.target.value })} maxLength={2000} rows={3} />
+              <p className="text-xs text-muted-foreground">Visible to everyone on your team. Avoid medical or other sensitive details.</p>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={isSaving}>
@@ -227,6 +288,7 @@ function PersonDialog({
 
 export default function PeoplePage() {
   const { canEdit } = useOrganization();
+  const fields = useTrackerFields("people");
   const { toast } = useToast();
   const [, navigate] = useLocation();
   const [people, setPeople] = useState<Person[]>([]);
@@ -281,9 +343,11 @@ export default function PeoplePage() {
       (p) =>
         (status === ALL || p.status === status) &&
         (program === ALL || p.program?.trim() === program) &&
-        (!q || [p.full_name, p.email, p.phone, p.program].some((v) => v?.toLowerCase().includes(q))),
+        (!q ||
+          [p.full_name, p.email, p.phone, p.program].some((v) => v?.toLowerCase().includes(q)) ||
+          fields.custom.some((f) => formatCustomValue(f, customOf(p)[f.id]).toLowerCase().includes(q))),
     );
-  }, [people, search, status, program]);
+  }, [people, search, status, program, fields.custom]);
 
   const totalCheckins = useMemo(() => [...checkins.values()].reduce((s, c) => s + c.count, 0), [checkins]);
 
@@ -303,11 +367,14 @@ export default function PeoplePage() {
           <h1 className="text-2xl font-serif font-bold">People</h1>
           <p className="text-muted-foreground">The people you serve, and how they're doing over time</p>
         </div>
-        {canEdit && state === "ready" && (
-          <Button onClick={() => setAdding(true)}>
-            <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Add person
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {state === "ready" && <CustomizeFieldsButton fields={fields} />}
+          {canEdit && state === "ready" && (
+            <Button onClick={() => setAdding(true)}>
+              <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Add person
+            </Button>
+          )}
+        </div>
       </div>
 
       <ReadOnlyNotice />
@@ -348,13 +415,13 @@ export default function PeoplePage() {
                 ))}
               </SelectContent>
             </Select>
-            {programs.length > 0 && (
+            {programs.length > 0 && fields.shows("program") && (
               <Select value={program} onValueChange={setProgram}>
                 <SelectTrigger className="w-48" aria-label="Filter by program">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={ALL}>All programs</SelectItem>
+                  <SelectItem value={ALL}>Any {fields.label("program").toLowerCase()}</SelectItem>
                   {programs.map((p) => (
                     <SelectItem key={p} value={p}>
                       {p}
@@ -387,10 +454,13 @@ export default function PeoplePage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Program</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Started</TableHead>
+                    <TableHead>{fields.splitNames ? "Name" : fields.label("full_name")}</TableHead>
+                    {fields.shows("program") && <TableHead>{fields.label("program")}</TableHead>}
+                    <TableHead>{fields.label("status")}</TableHead>
+                    <TableHead>{fields.label("start_date")}</TableHead>
+                    {fields.custom.map((f) => (
+                      <TableHead key={f.id}>{f.label}</TableHead>
+                    ))}
                     <TableHead className="text-right">Check-ins</TableHead>
                     <TableHead>Last check-in</TableHead>
                   </TableRow>
@@ -405,11 +475,16 @@ export default function PeoplePage() {
                             {p.full_name}
                           </Link>
                         </TableCell>
-                        <TableCell>{p.program ?? "-"}</TableCell>
+                        {fields.shows("program") && <TableCell>{p.program ?? "-"}</TableCell>}
                         <TableCell>
                           <Badge variant={STATUS_VARIANTS[p.status]}>{STATUS_LABELS[p.status]}</Badge>
                         </TableCell>
                         <TableCell className="whitespace-nowrap">{formatDate(p.start_date)}</TableCell>
+                        {fields.custom.map((f) => (
+                          <TableCell key={f.id} className="max-w-[180px] truncate">
+                            {formatCustomValue(f, customOf(p)[f.id]) || "-"}
+                          </TableCell>
+                        ))}
                         <TableCell className="text-right">{c?.count ?? 0}</TableCell>
                         <TableCell className="whitespace-nowrap text-muted-foreground">{c ? formatDate(toISODate(new Date(c.last))) : "-"}</TableCell>
                       </TableRow>
@@ -422,7 +497,7 @@ export default function PeoplePage() {
         </>
       )}
 
-      {adding && <PersonDialog person="new" programs={programs} onClose={() => setAdding(false)} onSaved={(id) => navigate(`/people/${id}`)} />}
+      {adding && <PersonDialog person="new" programs={programs} fields={fields} onClose={() => setAdding(false)} onSaved={(id) => navigate(`/people/${id}`)} />}
     </div>
   );
 }
@@ -457,6 +532,7 @@ function CopyLinkButton({ text }: { text: string }) {
 export function PersonPage() {
   const { id } = useParams<{ id: string }>();
   const { canEdit } = useOrganization();
+  const fields = useTrackerFields("people");
   const { toast } = useToast();
   const [, navigate] = useLocation();
   const [person, setPerson] = useState<Person | null>(null);
@@ -595,12 +671,20 @@ export function PersonPage() {
               <Badge variant={STATUS_VARIANTS[person.status]}>{STATUS_LABELS[person.status]}</Badge>
             </h1>
             <p className="text-sm text-muted-foreground">
-              {[person.program, `Started ${formatDate(person.start_date)}`, person.email, person.phone].filter(Boolean).join(" · ")}
+              {[
+                fields.shows("program") ? person.program : null,
+                `${fields.label("start_date")}: ${formatDate(person.start_date)}`,
+                fields.shows("email") ? person.email : null,
+                fields.shows("phone") ? person.phone : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             </p>
           </div>
         </div>
         {canEdit && (
           <div className="flex gap-2">
+            <CustomizeFieldsButton fields={fields} />
             <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
               <Pencil className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> Edit
             </Button>
@@ -611,9 +695,25 @@ export function PersonPage() {
         )}
       </div>
 
-      {person.notes && (
+      {fields.custom.some((f) => formatCustomValue(f, customOf(person)[f.id])) && (
         <Card className="p-4">
-          <p className="text-xs font-medium text-muted-foreground mb-1">Notes</p>
+          <p className="text-xs font-medium text-muted-foreground mb-2">Details</p>
+          <dl className="grid sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+            {fields.custom
+              .filter((f) => formatCustomValue(f, customOf(person)[f.id]))
+              .map((f) => (
+                <div key={f.id}>
+                  <dt className="text-xs text-muted-foreground">{f.label}</dt>
+                  <dd className="whitespace-pre-line break-words">{formatCustomValue(f, customOf(person)[f.id])}</dd>
+                </div>
+              ))}
+          </dl>
+        </Card>
+      )}
+
+      {person.notes && fields.shows("notes") && (
+        <Card className="p-4">
+          <p className="text-xs font-medium text-muted-foreground mb-1">{fields.label("notes")}</p>
           <p className="text-sm whitespace-pre-line">{person.notes}</p>
         </Card>
       )}
@@ -766,7 +866,7 @@ export function PersonPage() {
         )}
       </div>
 
-      {editing && <PersonDialog person={person} programs={programs} onClose={() => setEditing(false)} onSaved={() => load()} />}
+      {editing && <PersonDialog person={person} programs={programs} fields={fields} onClose={() => setEditing(false)} onSaved={() => load()} />}
       {viewing && formsById.get(viewing.form_id) && (
         <ResponseDialog
           fields={answerFields(formsById.get(viewing.form_id)!.fields as FormField[])}

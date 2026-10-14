@@ -13,6 +13,11 @@
  *     - Deleting a folder moves its links to Uncategorized (links are kept).
  *     - Links with no category are shown under "Uncategorized".
  *
+ * Customizable fields (lib/tracker-fields.ts): fields can be renamed, the
+ * description and folder hidden, and the organization's own fields added.
+ * With the folder field hidden, folders are not shown and every link is in
+ * one list; saved folder values are kept.
+ *
  * Read-only mode (viewers, or an ended trial): add, edit, delete and folder
  * buttons are hidden; searching, opening and copying links still work.
  *
@@ -50,8 +55,16 @@ import {
   Copy,
   Search,
   AlertTriangle,
+  Upload,
 } from "lucide-react";
-import type { Link } from "@/types/database";
+import { ImportDialog } from "@/components/import-dialog";
+import { CustomFieldInputs } from "@/components/custom-field-inputs";
+import { CustomizeFieldsButton } from "@/components/customize-fields-dialog";
+import { useTrackerFields, prepareCustomValues, customOf, formatCustomValue, type CustomValues } from "@/lib/tracker-fields";
+import type { Link as LinkRecord } from "@/types/database";
+
+/** A saved link, plus the organization's own fields (migration 011; missing on older databases). */
+type Link = LinkRecord & { custom?: CustomValues | null };
 
 // ===========================================================================
 // Constants
@@ -175,7 +188,14 @@ const loadCollapsed = (): Set<string> => {
 export default function LinksPage() {
   const { user } = useAuth();
   const { canEdit } = useOrganization();
+  /** Import window (CSV or Excel). */
+  const [showImport, setShowImport] = useState(false);
   const { toast } = useToast();
+  /** Renamed, hidden and custom fields for this organization. */
+  const fields = useTrackerFields("links");
+  const showsDescription = fields.shows("description");
+  /** With the folder field hidden, folder UI goes away and links show as one list. */
+  const showsFolders = fields.shows("category");
 
   // ----- Data state -----
   const [links, setLinks] = useState<Link[]>([]);
@@ -193,6 +213,8 @@ export default function LinksPage() {
   const [url, setUrl] = useState("");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("");
+  const [customValues, setCustomValues] = useState<CustomValues>({});
+  const [customErrors, setCustomErrors] = useState<Record<string, string>>({});
   /** URL errors only show after the user leaves the field or tries to save. */
   const [urlTouched, setUrlTouched] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -277,23 +299,31 @@ export default function LinksPage() {
     [existingFolders],
   );
 
-  /** Links matching the search box (title, URL, description or folder). */
+  /** Links matching the search box (title, URL, shown description or folder, custom values). */
   const filteredLinks = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return links;
-    return links.filter((l) =>
-      [l.title, l.url, l.description, l.category].some((field) => field?.toLowerCase().includes(q)),
-    );
-  }, [links, searchQuery]);
+    return links.filter((l) => {
+      const custom = customOf(l);
+      return [
+        l.title,
+        l.url,
+        showsDescription ? l.description : null,
+        showsFolders ? l.category : null,
+        ...fields.custom.map((f) => formatCustomValue(f, custom[f.id])),
+      ].some((field) => field?.toLowerCase().includes(q));
+    });
+  }, [links, searchQuery, showsDescription, showsFolders, fields.custom]);
 
   /**
    * Links grouped by folder. Folders are sorted A to Z with Uncategorized
-   * last; links inside each folder are sorted by title.
+   * last; links inside each folder are sorted by title. With the folder
+   * field hidden, every link goes in one group (shown without a header).
    */
   const sortedGroups = useMemo(() => {
     const grouped = new Map<string, Link[]>();
     for (const link of filteredLinks) {
-      const key = link.category || UNCATEGORIZED_KEY;
+      const key = (showsFolders && link.category) || UNCATEGORIZED_KEY;
       if (!grouped.has(key)) grouped.set(key, []);
       grouped.get(key)!.push(link);
     }
@@ -304,7 +334,7 @@ export default function LinksPage() {
         if (b === UNCATEGORIZED_KEY) return -1;
         return a.localeCompare(b);
       });
-  }, [filteredLinks]);
+  }, [filteredLinks, showsFolders]);
 
   // -------------------------------------------------------------------------
   // Link form helpers and validation
@@ -316,6 +346,8 @@ export default function LinksPage() {
     setUrl("");
     setDescription("");
     setCategory("");
+    setCustomValues({});
+    setCustomErrors({});
     setUrlTouched(false);
     setEditingLink(null);
     setShowDialog(false);
@@ -330,6 +362,8 @@ export default function LinksPage() {
     setTitle("");
     setUrl("");
     setDescription("");
+    setCustomValues({});
+    setCustomErrors({});
     setUrlTouched(false);
     setEditingLink(null);
     setCategory(folder);
@@ -343,6 +377,8 @@ export default function LinksPage() {
     setUrl(link.url);
     setDescription(link.description ?? "");
     setCategory(link.category ?? "");
+    setCustomValues(customOf(link));
+    setCustomErrors({});
     setUrlTouched(false);
     setShowDialog(true);
   };
@@ -352,7 +388,8 @@ export default function LinksPage() {
 
   /** Folder names that would be confused with the built-in Uncategorized group. */
   const isReservedFolder = (name: string) => cleanFolderName(name).toLowerCase() === UNCATEGORIZED_LABEL.toLowerCase();
-  const categoryError = isReservedFolder(category) ? `Leave the folder blank to use ${UNCATEGORIZED_LABEL}.` : null;
+  // Only checked while the folder field is shown; a hidden folder is never sent on save.
+  const categoryError = showsFolders && isReservedFolder(category) ? `Leave the folder blank to use ${UNCATEGORIZED_LABEL}.` : null;
 
   /**
    * Another saved link with the same address, if any. This is a warning
@@ -382,14 +419,22 @@ export default function LinksPage() {
     setUrlTouched(true);
     if (!user || !isFormValid || !normalizedUrl || isSaving) return;
 
+    // Custom fields: show problems under each field and stop.
+    const prepared = prepareCustomValues(fields.custom, customValues);
+    setCustomErrors(prepared.errors);
+    if (Object.keys(prepared.errors).length > 0) return;
+
     setIsSaving(true);
     try {
-      const folder = category.trim() ? resolveFolderName(category) : null;
+      const folder = showsFolders && category.trim() ? resolveFolderName(category) : null;
+      // Hidden fields are left out so an edit keeps their saved values.
       const payload = {
         title: title.trim(),
         url: normalizedUrl,
-        description: description.trim() || null,
-        category: folder,
+        ...(showsDescription ? { description: description.trim() || null } : {}),
+        ...(showsFolders ? { category: folder } : {}),
+        // Only once migration 011 has added the column.
+        ...(fields.isAvailable ? { custom: prepared.values } : {}),
       };
 
       const { error } = editingLink
@@ -618,16 +663,26 @@ export default function LinksPage() {
           <h1 className="text-2xl font-serif font-bold">Links</h1>
           <p className="text-muted-foreground">Organize partner websites, grant portals, and resources</p>
         </div>
-        {canEdit && (
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={openCreateFolder}>
-              <FolderPlus className="mr-1 h-4 w-4" aria-hidden="true" /> New folder
-            </Button>
-            <Button onClick={() => openCreate()}>
-              <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Add link
-            </Button>
-          </div>
-        )}
+        {showImport && <ImportDialog kind="links" onClose={() => setShowImport(false)} onImported={loadLinks} />}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Renders only for owners and admins. */}
+          <CustomizeFieldsButton fields={fields} />
+          {canEdit && (
+            <>
+              {showsFolders && (
+                <Button variant="outline" onClick={openCreateFolder}>
+                  <FolderPlus className="mr-1 h-4 w-4" aria-hidden="true" /> New folder
+                </Button>
+              )}
+              <Button variant="outline" onClick={() => setShowImport(true)}>
+                <Upload className="mr-1 h-4 w-4" aria-hidden="true" /> Import
+              </Button>
+              <Button onClick={() => openCreate()}>
+                <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Add link
+              </Button>
+            </>
+          )}
+        </div>
       </div>
       <ReadOnlyNotice />
 
@@ -639,7 +694,10 @@ export default function LinksPage() {
             aria-hidden="true"
           />
           <Input
-            placeholder="Search title, address, notes, folder"
+            placeholder={`Search ${[fields.label("title"), fields.label("url"), showsDescription && fields.label("description"), showsFolders && fields.label("category")]
+              .filter(Boolean)
+              .join(", ")
+              .toLowerCase()}`}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-9"
@@ -691,77 +749,89 @@ export default function LinksPage() {
             const label = folderLabel(folderKey);
             const isUncategorized = folderKey === UNCATEGORIZED_KEY;
             // While searching, show every match instead of hiding results in collapsed folders.
-            const isCollapsed = !isSearching && collapsedFolders.has(folderKey);
+            // With folders hidden there is one list and nothing to collapse.
+            const isCollapsed = showsFolders && !isSearching && collapsedFolders.has(folderKey);
             const panelId = `folder-panel-${encodeURIComponent(label)}`;
 
             return (
-              <section key={folderKey} className="space-y-3" aria-label={`${label} folder`}>
-                {/* ----- Folder header ----- */}
-                <div className="flex items-center justify-between gap-2">
-                  {/* aria-expanded + aria-controls tell screen readers this toggles the list below. */}
-                  <button
-                    type="button"
-                    onClick={() => toggleFolder(folderKey)}
-                    aria-expanded={!isCollapsed}
-                    aria-controls={panelId}
-                    className="flex items-center gap-2 text-sm font-medium hover:text-primary transition-colors group rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    {isCollapsed ? (
-                      <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-primary" aria-hidden="true" />
-                    ) : (
-                      <ChevronDown className="h-4 w-4 text-muted-foreground group-hover:text-primary" aria-hidden="true" />
-                    )}
-                    <Folder className="h-4 w-4 text-primary" aria-hidden="true" />
-                    <span>{label}</span>
-                    <span className="text-muted-foreground font-normal">({folderLinks.length})</span>
-                  </button>
-
-                  {/* Folder actions (hidden when read-only). Uncategorized is not a real folder, so it only gets "Add". */}
-                  {canEdit && (
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-xs h-7"
-                        onClick={() => openCreate(isUncategorized ? "" : folderKey)}
-                      >
-                        <Plus className="mr-1 h-3 w-3" aria-hidden="true" /> Add to folder
-                      </Button>
-                      {!isUncategorized && (
-                        <>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7"
-                            onClick={() => openRenameFolder(folderKey)}
-                            aria-label={`Rename ${label} folder`}
-                            title="Rename folder"
-                          >
-                            <Pencil className="h-3 w-3" aria-hidden="true" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 text-destructive hover:text-destructive"
-                            onClick={() =>
-                              requestDeleteFolder(folderKey, links.filter((l) => l.category === folderKey).length)
-                            }
-                            aria-label={`Remove ${label} folder`}
-                            title="Remove folder"
-                          >
-                            <Trash2 className="h-3 w-3" aria-hidden="true" />
-                          </Button>
-                        </>
+              <section
+                key={folderKey}
+                className="space-y-3"
+                aria-label={showsFolders ? `${label} folder` : "Links"}
+              >
+                {/* ----- Folder header (not shown when the folder field is hidden) ----- */}
+                {showsFolders && (
+                  <div className="flex items-center justify-between gap-2">
+                    {/* aria-expanded + aria-controls tell screen readers this toggles the list below. */}
+                    <button
+                      type="button"
+                      onClick={() => toggleFolder(folderKey)}
+                      aria-expanded={!isCollapsed}
+                      aria-controls={panelId}
+                      className="flex items-center gap-2 text-sm font-medium hover:text-primary transition-colors group rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {isCollapsed ? (
+                        <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-primary" aria-hidden="true" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4 text-muted-foreground group-hover:text-primary" aria-hidden="true" />
                       )}
-                    </div>
-                  )}
-                </div>
+                      <Folder className="h-4 w-4 text-primary" aria-hidden="true" />
+                      <span>{label}</span>
+                      <span className="text-muted-foreground font-normal">({folderLinks.length})</span>
+                    </button>
+
+                    {/* Folder actions (hidden when read-only). Uncategorized is not a real folder, so it only gets "Add". */}
+                    {canEdit && (
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-xs h-7"
+                          onClick={() => openCreate(isUncategorized ? "" : folderKey)}
+                        >
+                          <Plus className="mr-1 h-3 w-3" aria-hidden="true" /> Add to folder
+                        </Button>
+                        {!isUncategorized && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7"
+                              onClick={() => openRenameFolder(folderKey)}
+                              aria-label={`Rename ${label} folder`}
+                              title="Rename folder"
+                            >
+                              <Pencil className="h-3 w-3" aria-hidden="true" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-destructive hover:text-destructive"
+                              onClick={() =>
+                                requestDeleteFolder(folderKey, links.filter((l) => l.category === folderKey).length)
+                              }
+                              aria-label={`Remove ${label} folder`}
+                              title="Remove folder"
+                            >
+                              <Trash2 className="h-3 w-3" aria-hidden="true" />
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* ----- Link cards ----- */}
                 {!isCollapsed && (
-                  <div id={panelId} className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 pl-6">
+                  <div id={panelId} className={`grid sm:grid-cols-2 lg:grid-cols-3 gap-4 ${showsFolders ? "pl-6" : ""}`}>
                     {folderLinks.map((link) => {
                       const href = safeHref(link.url);
+                      const custom = customOf(link);
+                      /** Custom fields that have a value on this link. */
+                      const customItems = fields.custom
+                        .map((f) => ({ field: f, text: formatCustomValue(f, custom[f.id]) }))
+                        .filter((item) => item.text !== "");
                       return (
                         <Card key={link.id} className="p-5 hover-elevate flex flex-col">
                           {/* Icon and actions */}
@@ -809,8 +879,21 @@ export default function LinksPage() {
                             {link.title}
                           </h3>
                           <p className="text-xs text-muted-foreground truncate">{getHostname(link.url)}</p>
-                          {link.description && (
+                          {showsDescription && link.description && (
                             <p className="text-sm text-muted-foreground line-clamp-2 mt-1">{link.description}</p>
+                          )}
+                          {/* The organization's own fields, compactly as "Label: value". */}
+                          {customItems.length > 0 && (
+                            <dl className="mt-2 space-y-0.5 text-xs">
+                              {customItems.map(({ field, text }) => (
+                                <div key={field.id} className="flex gap-1 min-w-0">
+                                  <dt className="text-muted-foreground shrink-0">{field.label}:</dt>
+                                  <dd className="truncate" title={text}>
+                                    {text}
+                                  </dd>
+                                </div>
+                              ))}
+                            </dl>
                           )}
 
                           {/* Open link. Only rendered for safe http(s) addresses. */}
@@ -919,7 +1002,7 @@ export default function LinksPage() {
             <div className="space-y-4 py-2">
               {/* Title (required) */}
               <div className="space-y-2">
-                <Label htmlFor="link-title">Title</Label>
+                <Label htmlFor="link-title">{fields.label("title")}</Label>
                 <Input
                   id="link-title"
                   placeholder="Grant Portal, Partner Website..."
@@ -932,7 +1015,7 @@ export default function LinksPage() {
 
               {/* URL (required, validated) */}
               <div className="space-y-2">
-                <Label htmlFor="link-url">Web address</Label>
+                <Label htmlFor="link-url">{fields.label("url")}</Label>
                 <Input
                   id="link-url"
                   type="url"
@@ -956,68 +1039,82 @@ export default function LinksPage() {
                   <p className="flex items-center gap-1 text-xs text-amber-700 dark:text-amber-400">
                     <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
                     You already saved this address as "{duplicateLink.title}"
-                    {duplicateLink.category ? ` in ${duplicateLink.category}` : ""}.
+                    {showsFolders && duplicateLink.category ? ` in ${duplicateLink.category}` : ""}.
                   </p>
                 )}
               </div>
 
-              {/* Description */}
-              <div className="space-y-2">
-                <Label htmlFor="link-description">
-                  Description <span className="text-muted-foreground font-normal">(optional)</span>
-                </Label>
-                <Textarea
-                  id="link-description"
-                  placeholder="What is this link for?"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  maxLength={1000}
-                />
-              </div>
+              {/* Description (hideable) */}
+              {showsDescription && (
+                <div className="space-y-2">
+                  <Label htmlFor="link-description">
+                    {fields.label("description")} <span className="text-muted-foreground font-normal">(optional)</span>
+                  </Label>
+                  <Textarea
+                    id="link-description"
+                    placeholder="What is this link for?"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    maxLength={1000}
+                  />
+                </div>
+              )}
 
-              {/* Folder: free text with suggestions, plus quick-pick chips */}
-              <div className="space-y-2">
-                <Label htmlFor="link-folder">
-                  Folder <span className="text-muted-foreground font-normal">(optional)</span>
-                </Label>
-                <Input
-                  id="link-folder"
-                  placeholder="Type a folder name or leave blank"
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  list="folder-suggestions"
-                  maxLength={MAX_FOLDER_LENGTH}
-                  aria-invalid={Boolean(categoryError)}
-                />
-                <datalist id="folder-suggestions">
-                  {existingFolders.map((f) => (
-                    <option key={f} value={f} />
-                  ))}
-                </datalist>
-                {categoryError && <p className="text-xs text-destructive">{categoryError}</p>}
+              {/* Folder: free text with suggestions, plus quick-pick chips. Hideable; when hidden, an
+                 edited link keeps its saved folder because category is left out of the update. */}
+              {showsFolders && (
+                <div className="space-y-2">
+                  <Label htmlFor="link-folder">
+                    {fields.label("category")} <span className="text-muted-foreground font-normal">(optional)</span>
+                  </Label>
+                  <Input
+                    id="link-folder"
+                    placeholder="Type a folder name or leave blank"
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    list="folder-suggestions"
+                    maxLength={MAX_FOLDER_LENGTH}
+                    aria-invalid={Boolean(categoryError)}
+                  />
+                  <datalist id="folder-suggestions">
+                    {existingFolders.map((f) => (
+                      <option key={f} value={f} />
+                    ))}
+                  </datalist>
+                  {categoryError && <p className="text-xs text-destructive">{categoryError}</p>}
 
-                {/* Chips: clicking the selected chip again clears it (moves to Uncategorized). */}
-                {existingFolders.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-1" role="group" aria-label="Choose an existing folder">
-                    {existingFolders.map((f) => {
-                      const isSelected = cleanFolderName(category).toLowerCase() === f.toLowerCase();
-                      return (
-                        <button
-                          key={f}
-                          type="button"
-                          onClick={() => setCategory(isSelected ? "" : f)}
-                          aria-pressed={isSelected}
-                          className={`text-xs px-2 py-1 rounded-md border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                            isSelected ? "bg-primary text-primary-foreground border-primary" : "hover:border-primary"
-                          }`}
-                        >
-                          {f}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+                  {/* Chips: clicking the selected chip again clears it (moves to Uncategorized). */}
+                  {existingFolders.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1" role="group" aria-label="Choose an existing folder">
+                      {existingFolders.map((f) => {
+                        const isSelected = cleanFolderName(category).toLowerCase() === f.toLowerCase();
+                        return (
+                          <button
+                            key={f}
+                            type="button"
+                            onClick={() => setCategory(isSelected ? "" : f)}
+                            aria-pressed={isSelected}
+                            className={`text-xs px-2 py-1 rounded-md border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                              isSelected ? "bg-primary text-primary-foreground border-primary" : "hover:border-primary"
+                            }`}
+                          >
+                            {f}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* The organization's own fields */}
+              <CustomFieldInputs
+                fields={fields.custom}
+                values={customValues}
+                onChange={setCustomValues}
+                errors={customErrors}
+                idPrefix="link-custom"
+              />
             </div>
 
             <DialogFooter className="pt-2">

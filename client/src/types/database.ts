@@ -198,6 +198,11 @@ export interface Person {
   /** Secret part of their personal form links; changing it turns old links off. */
   access_token: string
   created_at: string
+  /** Set when the organization splits names (migration 011). */
+  first_name?: string | null
+  last_name?: string | null
+  /** Values of the organization's own fields (migration 011). */
+  custom?: Record<string, unknown>
 }
 
 export interface Link {

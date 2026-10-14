@@ -12,10 +12,15 @@
  *   - Add/edit dialog and a delete confirmation dialog
  *   - Read-only mode (viewers, or an ended trial): add, edit, delete and
  *     quantity buttons are hidden; viewing, search and filters still work
+ *   - Customizable fields (lib/tracker-fields.ts): owners and admins can
+ *     rename or hide built-in fields and add their own. Hidden fields keep
+ *     their saved values; a hidden "Restock at" uses the default threshold
+ *     for new items, so restock alerts still work.
  *
  * Backend assumptions:
  *   - Columns: id, user_id, name, description, quantity (integer), unit,
- *     category, condition, location, notes, low_stock_threshold (integer).
+ *     category, condition, location, notes, low_stock_threshold (integer),
+ *     and custom (jsonb, migration 011; optional until that has been run).
  *   - Row Level Security limits rows to the user's organization and blocks
  *     changes from viewers. user_id records who added the item; it isn't
  *     used for access.
@@ -51,7 +56,12 @@ import {
   MapPin,
   Tag,
   Search,
+  Upload,
 } from "lucide-react";
+import { ImportDialog } from "@/components/import-dialog";
+import { CustomizeFieldsButton } from "@/components/customize-fields-dialog";
+import { CustomFieldInputs } from "@/components/custom-field-inputs";
+import { useTrackerFields, prepareCustomValues, customOf, formatCustomValue, type CustomValues } from "@/lib/tracker-fields";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from "recharts";
 import type { InventoryItem } from "@/types/database";
 
@@ -65,11 +75,11 @@ type ViewMode = "grid" | "table" | "chart";
 type StockFilter = "all" | "low" | "out" | "in";
 
 /**
- * InventoryItem plus the low_stock_threshold column, which the generated
- * database type does not include yet. Replaces the original `as any` casts.
- * If you regenerate your Supabase types, this can be removed.
+ * InventoryItem plus the low_stock_threshold and custom columns, which the
+ * generated database type does not include yet. Replaces the original `as any`
+ * casts. If you regenerate your Supabase types, this can be removed.
  */
-type ItemWithThreshold = InventoryItem & { low_stock_threshold?: number | null };
+type ItemWithThreshold = InventoryItem & { low_stock_threshold?: number | null; custom?: CustomValues | null };
 
 /** What a stock-status badge needs to render. */
 interface StockStatus {
@@ -182,6 +192,10 @@ const loadSavedViewMode = (): ViewMode => {
 export default function InventoryPage() {
   const { user } = useAuth();
   const { canEdit } = useOrganization();
+  /** This organization's labels, hidden fields and custom fields for inventory. */
+  const fields = useTrackerFields("inventory_items");
+  /** Import window (CSV or Excel). */
+  const [showImport, setShowImport] = useState(false);
   const { toast } = useToast();
 
   // ----- Data state -----
@@ -211,6 +225,9 @@ export default function InventoryPage() {
   const [condition, setCondition] = useState("good");
   const [location, setLocation] = useState("");
   const [notes, setNotes] = useState("");
+  /** Values for the organization's own fields, keyed by field id. */
+  const [customValues, setCustomValues] = useState<CustomValues>({});
+  const [customErrors, setCustomErrors] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
 
   // ----- Quick-adjust and delete state -----
@@ -281,6 +298,8 @@ export default function InventoryPage() {
     setCondition("good");
     setLocation("");
     setNotes("");
+    setCustomValues({});
+    setCustomErrors({});
     setEditingItem(null);
     setShowDialog(false);
   };
@@ -303,6 +322,8 @@ export default function InventoryPage() {
     setCondition(item.condition ?? "good");
     setLocation(item.location ?? "");
     setNotes(item.notes ?? "");
+    setCustomValues({ ...customOf(item as ItemWithThreshold) });
+    setCustomErrors({});
     setShowDialog(true);
   };
 
@@ -324,7 +345,8 @@ export default function InventoryPage() {
   };
 
   const quantityError = validateWholeNumber(quantityText, "quantity");
-  const thresholdError = validateWholeNumber(thresholdText, "threshold");
+  // A hidden threshold isn't on the form, so it can't block saving.
+  const thresholdError = fields.shows("low_stock_threshold") ? validateWholeNumber(thresholdText, "threshold") : null;
   const isFormValid = name.trim() !== "" && !quantityError && !thresholdError;
 
   // -------------------------------------------------------------------------
@@ -339,23 +361,33 @@ export default function InventoryPage() {
    * - Validates quantity and threshold.
    * - try/finally so the Saving state always clears, even if the request throws.
    * - Editing keeps the original creator: user_id is only set on new items.
+   * - Hidden fields are left out, so editing never blanks their saved values.
+   *   New items still get the default threshold when "Restock at" is hidden.
+   * - Custom fields are checked first and saved in "custom" (only once
+   *   migration 011 has been run; before that the payload is unchanged).
    */
   const handleSave = async () => {
     if (!user || !isFormValid || isSaving) return;
 
+    const prepared = prepareCustomValues(fields.custom, customValues);
+    setCustomErrors(prepared.errors);
+    if (Object.keys(prepared.errors).length > 0) return;
+
     setIsSaving(true);
     try {
-      const payload = {
+      const payload: Record<string, unknown> = {
         name: name.trim(),
-        description: description.trim() || null,
         quantity: Number(quantityText),
-        unit: unit.trim() || null,
-        category: category.trim() || null,
-        condition: condition as InventoryItem["condition"],
-        location: location.trim() || null,
-        notes: notes.trim() || null,
-        low_stock_threshold: Number(thresholdText),
       };
+      if (fields.shows("description")) payload.description = description.trim() || null;
+      if (fields.shows("unit")) payload.unit = unit.trim() || null;
+      if (fields.shows("category")) payload.category = category.trim() || null;
+      if (fields.shows("condition")) payload.condition = condition as InventoryItem["condition"];
+      if (fields.shows("location")) payload.location = location.trim() || null;
+      if (fields.shows("notes")) payload.notes = notes.trim() || null;
+      if (fields.shows("low_stock_threshold")) payload.low_stock_threshold = Number(thresholdText);
+      else if (!editingItem) payload.low_stock_threshold = DEFAULT_LOW_STOCK_THRESHOLD;
+      if (fields.isAvailable) payload.custom = prepared.values;
 
       const { error } = editingItem
         ? await supabase.from("inventory_items").update(payload).eq("id", editingItem.id)
@@ -470,7 +502,7 @@ export default function InventoryPage() {
         } else if (oldQty > threshold && newQty <= threshold) {
           toast({
             title: "Low stock",
-            description: `${item.name} is running low: ${formatQty(newQty, item.unit)} left.`,
+            description: `${item.name} is running low: ${formatQty(newQty, unitOf(item))} left.`,
           });
         }
       }
@@ -490,6 +522,10 @@ export default function InventoryPage() {
   // Derived data (memoized)
   // -------------------------------------------------------------------------
 
+  /** The item's unit, or none when the Unit field is hidden (quantities then read "units"). */
+  const showsUnit = fields.shows("unit");
+  const unitOf = useCallback((item: InventoryItem) => (showsUnit ? item.unit : null), [showsUnit]);
+
   /** Items that need restocking, emptiest first, for the alert banner. */
   const restockItems = useMemo(
     () => items.filter(needsRestock).sort((a, b) => getQty(a) - getQty(b)),
@@ -500,11 +536,18 @@ export default function InventoryPage() {
   const filteredItems = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return items.filter((item) => {
+      // Hidden fields aren't searched; the organization's own fields are.
+      const custom = customOf(item as ItemWithThreshold);
       const matchesSearch =
         !q ||
-        [item.name, item.description, item.category, item.location, item.notes].some((field) =>
-          field?.toLowerCase().includes(q),
-        );
+        [
+          item.name,
+          fields.shows("description") ? item.description : null,
+          fields.shows("category") ? item.category : null,
+          fields.shows("location") ? item.location : null,
+          fields.shows("notes") ? item.notes : null,
+          ...fields.custom.map((f) => formatCustomValue(f, custom[f.id])),
+        ].some((field) => field?.toLowerCase().includes(q));
       const matchesStock =
         stockFilter === "all" ||
         (stockFilter === "out" && isOutOfStock(item)) ||
@@ -512,7 +555,7 @@ export default function InventoryPage() {
         (stockFilter === "in" && !needsRestock(item));
       return matchesSearch && matchesStock;
     });
-  }, [items, searchQuery, stockFilter]);
+  }, [items, searchQuery, stockFilter, fields]);
 
   /**
    * Chart rows. Keeps the full name for the tooltip and a short label for the
@@ -525,10 +568,10 @@ export default function InventoryPage() {
         fullName: item.name,
         label: item.name.length > MAX_AXIS_LABEL_LENGTH ? `${item.name.slice(0, MAX_AXIS_LABEL_LENGTH)}...` : item.name,
         quantity: getQty(item),
-        unit: item.unit,
+        unit: unitOf(item),
         low: needsRestock(item),
       })),
-    [filteredItems],
+    [filteredItems, unitOf],
   );
 
   /** Existing categories, offered as suggestions in the form. */
@@ -550,6 +593,20 @@ export default function InventoryPage() {
   };
 
   const isFiltering = searchQuery.trim() !== "" || stockFilter !== "all";
+
+  /** Search box hint, using this organization's names for the searchable fields. */
+  const searchPlaceholder = `Search ${["name", "category", "location", "notes"]
+    .filter((key) => fields.shows(key))
+    .map((key) => fields.label(key).toLowerCase())
+    .join(", ")}`;
+
+  /** Custom values with something in them, for the cards. */
+  const filledCustom = (item: InventoryItem) => {
+    const custom = customOf(item as ItemWithThreshold);
+    return fields.custom
+      .map((f) => ({ field: f, text: formatCustomValue(f, custom[f.id]) }))
+      .filter((c) => c.text !== "");
+  };
 
   // -------------------------------------------------------------------------
   // Render
@@ -582,12 +639,19 @@ export default function InventoryPage() {
             ))}
           </div>
           {canEdit && (
-            <Button onClick={openCreate}>
-              <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Add item
-            </Button>
+            <>
+              <Button variant="outline" onClick={() => setShowImport(true)}>
+                <Upload className="mr-1 h-4 w-4" aria-hidden="true" /> Import
+              </Button>
+              <Button onClick={openCreate}>
+                <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Add item
+              </Button>
+            </>
           )}
+          <CustomizeFieldsButton fields={fields} />
         </div>
       </div>
+      {showImport && <ImportDialog kind="inventory_items" onClose={() => setShowImport(false)} onImported={loadItems} />}
       <ReadOnlyNotice />
 
       {/* ===== Stock alerts banner =====
@@ -604,7 +668,7 @@ export default function InventoryPage() {
           <div className="flex flex-wrap gap-2">
             {restockItems.map((item) => {
               const status = getStockStatus(item);
-              const text = `${item.name}: ${isOutOfStock(item) ? "out of stock" : `${formatQty(getQty(item), item.unit)} left`}`;
+              const text = `${item.name}: ${isOutOfStock(item) ? "out of stock" : `${formatQty(getQty(item), unitOf(item))} left`}`;
               if (!canEdit) {
                 return (
                   <Badge key={item.id} variant={status.variant} className={`text-xs ${status.className ?? ""}`}>
@@ -639,7 +703,7 @@ export default function InventoryPage() {
               aria-hidden="true"
             />
             <Input
-              placeholder="Search name, category, location, notes"
+              placeholder={searchPlaceholder}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="pl-9"
@@ -728,7 +792,7 @@ export default function InventoryPage() {
                         <h3 className="font-semibold truncate" title={item.name}>
                           {item.name}
                         </h3>
-                        {item.description && (
+                        {fields.shows("description") && item.description && (
                           <p className="text-sm text-muted-foreground line-clamp-2 mt-0.5">{item.description}</p>
                         )}
                       </div>
@@ -755,7 +819,7 @@ export default function InventoryPage() {
                       )}
                       <div className="text-center" aria-live="polite">
                         <p className={`text-2xl font-bold ${isLow ? "text-destructive" : ""}`}>{qty}</p>
-                        <p className="text-xs text-muted-foreground">{item.unit?.trim() || "units"}</p>
+                        <p className="text-xs text-muted-foreground">{unitOf(item)?.trim() || "units"}</p>
                       </div>
                       {canEdit && (
                         <Button
@@ -790,19 +854,33 @@ export default function InventoryPage() {
 
                     {/* Category, location and condition. The location emoji is replaced with an icon. */}
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground mb-3">
-                      {item.category && (
+                      {fields.shows("category") && item.category && (
                         <span className="flex items-center gap-1">
                           <Tag className="h-3 w-3" aria-hidden="true" /> {item.category}
                         </span>
                       )}
-                      {item.location && (
+                      {fields.shows("location") && item.location && (
                         <span className="flex items-center gap-1">
                           <MapPin className="h-3 w-3" aria-hidden="true" />
-                          <span className="sr-only">Location:</span> {item.location}
+                          <span className="sr-only">{fields.label("location")}:</span> {item.location}
                         </span>
                       )}
-                      {item.condition && renderConditionBadge(item.condition)}
+                      {fields.shows("condition") && item.condition && renderConditionBadge(item.condition)}
                     </div>
+
+                    {/* The organization's own fields, when filled in */}
+                    {filledCustom(item).length > 0 && (
+                      <dl className="space-y-0.5 text-xs mb-3">
+                        {filledCustom(item).map(({ field, text }) => (
+                          <div key={field.id} className="flex gap-1 min-w-0">
+                            <dt className="text-muted-foreground shrink-0">{field.label}:</dt>
+                            <dd className="truncate" title={text}>
+                              {text}
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                    )}
 
                     {/* Actions, pinned to the bottom so cards line up */}
                     {canEdit && (
@@ -834,12 +912,15 @@ export default function InventoryPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Name</TableHead>
+                    <TableHead>{fields.label("name")}</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead className="text-center">Quantity</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead>Location</TableHead>
-                    <TableHead>Condition</TableHead>
+                    <TableHead className="text-center">{fields.label("quantity")}</TableHead>
+                    {fields.shows("category") && <TableHead>{fields.label("category")}</TableHead>}
+                    {fields.shows("location") && <TableHead>{fields.label("location")}</TableHead>}
+                    {fields.shows("condition") && <TableHead>{fields.label("condition")}</TableHead>}
+                    {fields.custom.map((f) => (
+                      <TableHead key={f.id}>{f.label}</TableHead>
+                    ))}
                     {canEdit && <TableHead className="w-20">Actions</TableHead>}
                   </TableRow>
                 </TableHeader>
@@ -893,9 +974,16 @@ export default function InventoryPage() {
                             )}
                           </div>
                         </TableCell>
-                        <TableCell>{item.category ?? "-"}</TableCell>
-                        <TableCell>{item.location ?? "-"}</TableCell>
-                        <TableCell>{item.condition ? renderConditionBadge(item.condition) : "-"}</TableCell>
+                        {fields.shows("category") && <TableCell>{item.category ?? "-"}</TableCell>}
+                        {fields.shows("location") && <TableCell>{item.location ?? "-"}</TableCell>}
+                        {fields.shows("condition") && (
+                          <TableCell>{item.condition ? renderConditionBadge(item.condition) : "-"}</TableCell>
+                        )}
+                        {fields.custom.map((f) => (
+                          <TableCell key={f.id}>
+                            {formatCustomValue(f, customOf(item as ItemWithThreshold)[f.id]) || "-"}
+                          </TableCell>
+                        ))}
                         {canEdit && (
                           <TableCell>
                             <div className="flex items-center gap-1">
@@ -1000,7 +1088,7 @@ export default function InventoryPage() {
           <div className="space-y-4 py-2">
             {/* Name (required) */}
             <div className="space-y-2">
-              <Label htmlFor="item-name">Name</Label>
+              <Label htmlFor="item-name">{fields.label("name")}</Label>
               <Input
                 id="item-name"
                 placeholder="Item name"
@@ -1012,22 +1100,24 @@ export default function InventoryPage() {
             </div>
 
             {/* Description */}
-            <div className="space-y-2">
-              <Label htmlFor="item-description">
-                Description <span className="text-muted-foreground font-normal">(optional)</span>
-              </Label>
-              <Textarea
-                id="item-description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                maxLength={1000}
-              />
-            </div>
+            {fields.shows("description") && (
+              <div className="space-y-2">
+                <Label htmlFor="item-description">
+                  {fields.label("description")} <span className="text-muted-foreground font-normal">(optional)</span>
+                </Label>
+                <Textarea
+                  id="item-description"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  maxLength={1000}
+                />
+              </div>
+            )}
 
             {/* Quantity and unit */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="item-quantity">Quantity</Label>
+                <Label htmlFor="item-quantity">{fields.label("quantity")}</Label>
                 <Input
                   id="item-quantity"
                   type="number"
@@ -1045,103 +1135,126 @@ export default function InventoryPage() {
                   </p>
                 )}
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="item-unit">Unit</Label>
-                <Input
-                  id="item-unit"
-                  placeholder="boxes, lbs, units..."
-                  value={unit}
-                  onChange={(e) => setUnit(e.target.value)}
-                  maxLength={30}
-                />
-              </div>
+              {fields.shows("unit") && (
+                <div className="space-y-2">
+                  <Label htmlFor="item-unit">{fields.label("unit")}</Label>
+                  <Input
+                    id="item-unit"
+                    placeholder="boxes, lbs, units..."
+                    value={unit}
+                    onChange={(e) => setUnit(e.target.value)}
+                    maxLength={30}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Category (with suggestions) and condition */}
-            <div className="grid grid-cols-2 gap-4">
+            {(fields.shows("category") || fields.shows("condition")) && (
+              <div className="grid grid-cols-2 gap-4">
+                {fields.shows("category") && (
+                  <div className="space-y-2">
+                    <Label htmlFor="item-category">{fields.label("category")}</Label>
+                    <Input
+                      id="item-category"
+                      placeholder="Food, Clothing..."
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value)}
+                      list="inventory-category-suggestions"
+                      maxLength={60}
+                    />
+                    <datalist id="inventory-category-suggestions">
+                      {categorySuggestions.map((c) => (
+                        <option key={c} value={c} />
+                      ))}
+                    </datalist>
+                  </div>
+                )}
+                {fields.shows("condition") && (
+                  <div className="space-y-2">
+                    <Label htmlFor="item-condition">{fields.label("condition")}</Label>
+                    <Select value={condition} onValueChange={setCondition}>
+                      <SelectTrigger id="item-condition">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {CONDITION_OPTIONS.map((opt) => (
+                          <SelectItem key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Low-stock threshold */}
+            {fields.shows("low_stock_threshold") && (
               <div className="space-y-2">
-                <Label htmlFor="item-category">Category</Label>
+                <Label htmlFor="item-threshold">{fields.label("low_stock_threshold")}</Label>
                 <Input
-                  id="item-category"
-                  placeholder="Food, Clothing..."
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  list="inventory-category-suggestions"
-                  maxLength={60}
+                  id="item-threshold"
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  step={1}
+                  value={thresholdText}
+                  onChange={(e) => setThresholdText(e.target.value)}
+                  aria-invalid={Boolean(thresholdError)}
+                  aria-describedby="item-threshold-help"
                 />
-                <datalist id="inventory-category-suggestions">
-                  {categorySuggestions.map((c) => (
-                    <option key={c} value={c} />
+                <p id="item-threshold-help" className={`text-xs ${thresholdError ? "text-destructive" : "text-muted-foreground"}`}>
+                  {thresholdError ?? "Flag this item when the quantity drops to or below this number. Use 0 to turn alerts off."}
+                </p>
+              </div>
+            )}
+
+            {/* Location (with suggestions) */}
+            {fields.shows("location") && (
+              <div className="space-y-2">
+                <Label htmlFor="item-location">{fields.label("location")}</Label>
+                <Input
+                  id="item-location"
+                  placeholder="Storage room, Shelf A..."
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  list="inventory-location-suggestions"
+                  maxLength={100}
+                />
+                <datalist id="inventory-location-suggestions">
+                  {locationSuggestions.map((l) => (
+                    <option key={l} value={l} />
                   ))}
                 </datalist>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="item-condition">Condition</Label>
-                <Select value={condition} onValueChange={setCondition}>
-                  <SelectTrigger id="item-condition">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CONDITION_OPTIONS.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Low-stock threshold */}
-            <div className="space-y-2">
-              <Label htmlFor="item-threshold">Low stock alert threshold</Label>
-              <Input
-                id="item-threshold"
-                type="number"
-                inputMode="numeric"
-                min={0}
-                step={1}
-                value={thresholdText}
-                onChange={(e) => setThresholdText(e.target.value)}
-                aria-invalid={Boolean(thresholdError)}
-                aria-describedby="item-threshold-help"
-              />
-              <p id="item-threshold-help" className={`text-xs ${thresholdError ? "text-destructive" : "text-muted-foreground"}`}>
-                {thresholdError ?? "Flag this item when the quantity drops to or below this number. Use 0 to turn alerts off."}
-              </p>
-            </div>
-
-            {/* Location (with suggestions) */}
-            <div className="space-y-2">
-              <Label htmlFor="item-location">Location</Label>
-              <Input
-                id="item-location"
-                placeholder="Storage room, Shelf A..."
-                value={location}
-                onChange={(e) => setLocation(e.target.value)}
-                list="inventory-location-suggestions"
-                maxLength={100}
-              />
-              <datalist id="inventory-location-suggestions">
-                {locationSuggestions.map((l) => (
-                  <option key={l} value={l} />
-                ))}
-              </datalist>
-            </div>
+            )}
 
             {/* Notes */}
-            <div className="space-y-2">
-              <Label htmlFor="item-notes">
-                Notes <span className="text-muted-foreground font-normal">(optional)</span>
-              </Label>
-              <Textarea
-                id="item-notes"
-                placeholder="Any additional notes..."
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                maxLength={1000}
-              />
-            </div>
+            {fields.shows("notes") && (
+              <div className="space-y-2">
+                <Label htmlFor="item-notes">
+                  {fields.label("notes")} <span className="text-muted-foreground font-normal">(optional)</span>
+                </Label>
+                <Textarea
+                  id="item-notes"
+                  placeholder="Any additional notes..."
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  maxLength={1000}
+                />
+              </div>
+            )}
+
+            {/* The organization's own fields */}
+            <CustomFieldInputs
+              fields={fields.custom}
+              values={customValues}
+              onChange={setCustomValues}
+              errors={customErrors}
+              idPrefix="inventory-custom"
+            />
           </div>
 
           <DialogFooter>
@@ -1166,7 +1279,7 @@ export default function InventoryPage() {
           <DialogHeader>
             <DialogTitle>Delete this item?</DialogTitle>
             <DialogDescription>
-              "{pendingDelete?.name}" ({pendingDelete ? formatQty(getQty(pendingDelete), pendingDelete.unit) : ""}) will
+              "{pendingDelete?.name}" ({pendingDelete ? formatQty(getQty(pendingDelete), unitOf(pendingDelete)) : ""}) will
               be permanently removed from your inventory. This cannot be undone.
             </DialogDescription>
           </DialogHeader>

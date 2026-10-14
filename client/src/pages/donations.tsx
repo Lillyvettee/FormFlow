@@ -14,6 +14,8 @@
  *
  * Assumptions about the backend:
  *   - Table "donations" has the columns listed in the Donation interface plus user_id.
+ *   - Migration 011 adds custom, first_name and last_name. Until it has run,
+ *     fields.isAvailable is false and those columns are never sent.
  *   - Row Level Security (RLS) limits rows to the user's organization and
  *     blocks changes from viewers. user_id records who created the row; it
  *     isn't used for access.
@@ -36,7 +38,19 @@ import { useAuth } from "@/hooks/use-auth";
 import { useOrganization } from "@/hooks/use-organization";
 import { ReadOnlyNotice } from "@/components/read-only-notice";
 import { friendlyWriteError } from "@/lib/db-errors";
-import { Plus, DollarSign, Trash2, Pencil, Download, TrendingUp, Search } from "lucide-react";
+import { Plus, DollarSign, Trash2, Pencil, Download, TrendingUp, Search, Upload } from "lucide-react";
+import { ImportDialog } from "@/components/import-dialog";
+import { CustomFieldInputs, SplitNameInputs } from "@/components/custom-field-inputs";
+import { CustomizeFieldsButton } from "@/components/customize-fields-dialog";
+import {
+  useTrackerFields,
+  prepareCustomValues,
+  customOf,
+  formatCustomValue,
+  joinName,
+  splitName,
+  type CustomValues,
+} from "@/lib/tracker-fields";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 // ---------------------------------------------------------------------------
@@ -55,6 +69,11 @@ interface Donation {
   payment_method: string | null;
   notes: string | null;
   created_at: string;
+  /** Organization-defined field values keyed by field id (migration 011). */
+  custom?: CustomValues | null;
+  /** Set when names are split; donor_name is still saved as "First Last". */
+  first_name?: string | null;
+  last_name?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +163,10 @@ export default function DonationsPage() {
   const { toast } = useToast();
   /** False for viewers and for read-only organizations; hides add/edit/delete controls. */
   const { canEdit } = useOrganization();
+  /** Organization's field settings: renamed labels, hidden fields, split names, custom fields. */
+  const fields = useTrackerFields("donations");
+  /** Import window (CSV or Excel). */
+  const [showImport, setShowImport] = useState(false);
 
   // ----- Data state -----
   const [donations, setDonations] = useState<Donation[]>([]);
@@ -157,11 +180,17 @@ export default function DonationsPage() {
   /** When non-null, the dialog is editing this donation instead of creating one. */
   const [editingDonation, setEditingDonation] = useState<Donation | null>(null);
   const [donorName, setDonorName] = useState("");
+  /** Used instead of donorName when fields.splitNames is on. */
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(todayLocal());
   const [campaign, setCampaign] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [notes, setNotes] = useState("");
+  const [customValues, setCustomValues] = useState<CustomValues>({});
+  /** Problems with custom values from the last save attempt, keyed by field id. */
+  const [customErrors, setCustomErrors] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
 
   // ----- Delete confirmation state -----
@@ -217,11 +246,15 @@ export default function DonationsPage() {
   /** Clear every form field and close the add/edit dialog. */
   const resetForm = () => {
     setDonorName("");
+    setFirstName("");
+    setLastName("");
     setAmount("");
     setDate(todayLocal());
     setCampaign("");
     setPaymentMethod("");
     setNotes("");
+    setCustomValues({});
+    setCustomErrors({});
     setEditingDonation(null);
     setShowDialog(false);
   };
@@ -236,11 +269,18 @@ export default function DonationsPage() {
   const openEdit = (d: Donation) => {
     setEditingDonation(d);
     setDonorName(d.donor_name);
+    // Rows saved before names were split have no first/last yet; guess from the full name.
+    const guess = splitName(d.donor_name);
+    const hasSplit = d.first_name != null || d.last_name != null;
+    setFirstName(hasSplit ? (d.first_name ?? "") : guess.first);
+    setLastName(hasSplit ? (d.last_name ?? "") : guess.last);
     setAmount(String(d.amount));
     setDate(d.date);
     setCampaign(d.campaign ?? "");
     setPaymentMethod(d.payment_method ?? "");
     setNotes(d.notes ?? "");
+    setCustomValues(customOf(d));
+    setCustomErrors({});
     setShowDialog(true);
   };
 
@@ -262,7 +302,10 @@ export default function DonationsPage() {
           ? `Amount cannot exceed ${formatCurrency(MAX_AMOUNT)}.`
           : null;
 
-  const isFormValid = donorName.trim() !== "" && amount !== "" && amountError === null && date !== "";
+  /** In split mode, at least a first or last name is required. */
+  const hasName = fields.splitNames ? joinName(firstName, lastName) !== "" : donorName.trim() !== "";
+
+  const isFormValid = hasName && amount !== "" && amountError === null && date !== "";
 
   // -------------------------------------------------------------------------
   // Create / update
@@ -276,20 +319,36 @@ export default function DonationsPage() {
    *   request throws (network failure) instead of returning an error object.
    * - Rounds the amount to cents to avoid floating point values like 10.004.
    * - Editing keeps the original creator: user_id is only set on new rows.
+   * - Hidden fields are left out of the payload, so values saved before a
+   *   field was hidden are kept on edit.
+   * - custom/first_name/last_name are only sent once migration 011 has run.
    */
   const handleSave = async () => {
     if (!user || !isFormValid) return;
 
+    const prepared = prepareCustomValues(fields.custom, customValues);
+    setCustomErrors(prepared.errors);
+    if (Object.keys(prepared.errors).length > 0) return;
+
+    const fullName = fields.splitNames ? joinName(firstName, lastName) : donorName.trim();
+
     setIsSaving(true);
     try {
-      const payload = {
-        donor_name: donorName.trim(),
+      const payload: Record<string, unknown> = {
+        donor_name: fullName,
         amount: Math.round(parsedAmount * 100) / 100,
         date,
-        campaign: campaign.trim() || null,
-        payment_method: paymentMethod || null,
-        notes: notes.trim() || null,
       };
+      if (fields.shows("campaign")) payload.campaign = campaign.trim() || null;
+      if (fields.shows("payment_method")) payload.payment_method = paymentMethod || null;
+      if (fields.shows("notes")) payload.notes = notes.trim() || null;
+      if (fields.isAvailable) {
+        // Keep first/last consistent with donor_name in both modes.
+        const parts = fields.splitNames ? { first: firstName.trim(), last: lastName.trim() } : splitName(fullName);
+        payload.first_name = parts.first || null;
+        payload.last_name = parts.last || null;
+        payload.custom = prepared.values;
+      }
 
       const { error } = editingDonation
         ? await supabase
@@ -361,14 +420,20 @@ export default function DonationsPage() {
   // Derived data (memoized so large lists are not re-processed on every keystroke)
   // -------------------------------------------------------------------------
 
-  /** Donations matching the search box (donor, campaign, method or notes). */
+  /** Donations matching the search box (donor, campaign, method, notes or custom field text). */
   const filteredDonations = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return donations;
     return donations.filter((d) =>
-      [d.donor_name, d.campaign, d.payment_method, d.notes].some((field) => field?.toLowerCase().includes(q)),
+      [
+        d.donor_name,
+        d.campaign,
+        d.payment_method,
+        d.notes,
+        ...fields.custom.map((f) => formatCustomValue(f, customOf(d)[f.id])),
+      ].some((field) => field?.toLowerCase().includes(q)),
     );
-  }, [donations, searchQuery]);
+  }, [donations, searchQuery, fields.custom]);
 
   /**
    * Summary numbers for the stat cards. These always use ALL donations,
@@ -445,15 +510,27 @@ export default function DonationsPage() {
    * - Exports the filtered list, so a search doubles as a quick report filter.
    */
   const exportCSV = () => {
-    const headers = ["Donor", "Amount", "Date", "Campaign", "Payment Method", "Notes"];
-    const rows = filteredDonations.map((d) => [
-      d.donor_name,
-      Number(d.amount).toFixed(2),
-      d.date,
-      d.campaign ?? "",
-      d.payment_method ?? "",
-      d.notes ?? "",
-    ]);
+    // Columns follow the organization's field settings: renamed labels,
+    // hidden built-ins skipped, custom fields appended as formatted text.
+    const columns: { header: string; value: (d: Donation) => unknown }[] = [
+      { header: fields.label("donor_name"), value: (d) => d.donor_name },
+      ...(fields.splitNames
+        ? [
+            { header: "First name", value: (d: Donation) => d.first_name ?? splitName(d.donor_name).first },
+            { header: "Last name", value: (d: Donation) => d.last_name ?? splitName(d.donor_name).last },
+          ]
+        : []),
+      { header: fields.label("amount"), value: (d) => Number(d.amount).toFixed(2) },
+      { header: fields.label("date"), value: (d) => d.date },
+      ...(fields.shows("campaign") ? [{ header: fields.label("campaign"), value: (d: Donation) => d.campaign ?? "" }] : []),
+      ...(fields.shows("payment_method")
+        ? [{ header: fields.label("payment_method"), value: (d: Donation) => d.payment_method ?? "" }]
+        : []),
+      ...(fields.shows("notes") ? [{ header: fields.label("notes"), value: (d: Donation) => d.notes ?? "" }] : []),
+      ...fields.custom.map((f) => ({ header: f.label, value: (d: Donation) => formatCustomValue(f, customOf(d)[f.id]) })),
+    ];
+    const headers = columns.map((c) => c.header);
+    const rows = filteredDonations.map((d) => columns.map((c) => c.value(d)));
 
     const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
@@ -467,6 +544,13 @@ export default function DonationsPage() {
     document.body.removeChild(link);
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
+
+  /** Number of table columns, so the "no matches" row spans the whole table. */
+  const columnCount =
+    3 +
+    ["campaign", "payment_method", "notes"].filter((k) => fields.shows(k)).length +
+    fields.custom.length +
+    (canEdit ? 1 : 0);
 
   // -------------------------------------------------------------------------
   // Render
@@ -487,13 +571,21 @@ export default function DonationsPage() {
               <Download className="mr-1 h-4 w-4" aria-hidden="true" /> Export CSV
             </Button>
           )}
+          {/* Renders only for owners and admins. */}
+          <CustomizeFieldsButton fields={fields} />
           {canEdit && (
-            <Button onClick={openCreate}>
-              <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Record donation
-            </Button>
+            <>
+              <Button variant="outline" onClick={() => setShowImport(true)}>
+                <Upload className="mr-1 h-4 w-4" aria-hidden="true" /> Import
+              </Button>
+              <Button onClick={openCreate}>
+                <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Record donation
+              </Button>
+            </>
           )}
         </div>
       </div>
+      {showImport && <ImportDialog kind="donations" onClose={() => setShowImport(false)} onImported={loadDonations} />}
       <ReadOnlyNotice />
 
       {/* ===== Summary stats ===== */}
@@ -515,11 +607,12 @@ export default function DonationsPage() {
             ))}
       </div>
 
-      {/* ===== Chart: totals by campaign ===== */}
-      {!isLoading && chartData.length > 0 && (
+      {/* ===== Chart: totals by campaign (hidden along with the campaign field) ===== */}
+      {!isLoading && fields.shows("campaign") && chartData.length > 0 && (
         <Card className="p-6">
           <h2 className="font-semibold mb-4 flex items-center gap-2">
-            <TrendingUp className="h-4 w-4 text-primary" aria-hidden="true" /> Donations by campaign
+            <TrendingUp className="h-4 w-4 text-primary" aria-hidden="true" /> Donations by{" "}
+            {fields.label("campaign").toLowerCase()}
           </h2>
           <div className="h-52">
             <ResponsiveContainer width="100%" height="100%">
@@ -573,12 +666,15 @@ export default function DonationsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Donor</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Campaign</TableHead>
-                  <TableHead>Method</TableHead>
-                  <TableHead>Notes</TableHead>
+                  <TableHead>{fields.label("donor_name")}</TableHead>
+                  <TableHead className="text-right">{fields.label("amount")}</TableHead>
+                  <TableHead>{fields.label("date")}</TableHead>
+                  {fields.shows("campaign") && <TableHead>{fields.label("campaign")}</TableHead>}
+                  {fields.shows("payment_method") && <TableHead>{fields.label("payment_method")}</TableHead>}
+                  {fields.shows("notes") && <TableHead>{fields.label("notes")}</TableHead>}
+                  {fields.custom.map((f) => (
+                    <TableHead key={f.id}>{f.label}</TableHead>
+                  ))}
                   {canEdit && <TableHead className="w-20">Actions</TableHead>}
                 </TableRow>
               </TableHeader>
@@ -586,7 +682,7 @@ export default function DonationsPage() {
                 {filteredDonations.length === 0 ? (
                   // Search returned nothing: explain why the table is empty.
                   <TableRow>
-                    <TableCell colSpan={canEdit ? 7 : 6} className="py-10 text-center text-muted-foreground">
+                    <TableCell colSpan={columnCount} className="py-10 text-center text-muted-foreground">
                       No donations match "{searchQuery}".
                     </TableCell>
                   </TableRow>
@@ -598,12 +694,24 @@ export default function DonationsPage() {
                         {formatCurrency(Number(d.amount))}
                       </TableCell>
                       <TableCell className="whitespace-nowrap">{parseLocalDate(d.date).toLocaleDateString()}</TableCell>
-                      <TableCell>{d.campaign ? <Badge variant="secondary">{d.campaign}</Badge> : "-"}</TableCell>
-                      <TableCell>{d.payment_method ?? "-"}</TableCell>
+                      {fields.shows("campaign") && (
+                        <TableCell>{d.campaign ? <Badge variant="secondary">{d.campaign}</Badge> : "-"}</TableCell>
+                      )}
+                      {fields.shows("payment_method") && <TableCell>{d.payment_method ?? "-"}</TableCell>}
                       {/* title attribute shows the full note on hover since the cell is truncated. */}
-                      <TableCell className="max-w-[150px] truncate text-muted-foreground" title={d.notes ?? undefined}>
-                        {d.notes ?? "-"}
-                      </TableCell>
+                      {fields.shows("notes") && (
+                        <TableCell className="max-w-[150px] truncate text-muted-foreground" title={d.notes ?? undefined}>
+                          {d.notes ?? "-"}
+                        </TableCell>
+                      )}
+                      {fields.custom.map((f) => {
+                        const text = formatCustomValue(f, customOf(d)[f.id]);
+                        return (
+                          <TableCell key={f.id} className="max-w-[150px] truncate" title={text || undefined}>
+                            {text || "-"}
+                          </TableCell>
+                        );
+                      })}
                       {canEdit && (
                         <TableCell>
                           <div className="flex items-center gap-1">
@@ -671,22 +779,36 @@ export default function DonationsPage() {
 
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-2 gap-4">
-              {/* Donor name (required). htmlFor/id pairs make labels clickable and accessible. */}
+              {/* Donor name (required). htmlFor/id pairs make labels clickable and accessible.
+                  Shown as First + Last boxes when the organization splits names. */}
               <div className="space-y-2 col-span-2">
-                <Label htmlFor="donation-donor">Donor name</Label>
-                <Input
-                  id="donation-donor"
-                  placeholder="Jane Smith"
-                  value={donorName}
-                  onChange={(e) => setDonorName(e.target.value)}
-                  maxLength={200}
-                  autoFocus
-                />
+                {fields.splitNames ? (
+                  <SplitNameInputs
+                    first={firstName}
+                    last={lastName}
+                    onFirst={setFirstName}
+                    onLast={setLastName}
+                    idPrefix="donation-donor"
+                    autoFocus
+                  />
+                ) : (
+                  <>
+                    <Label htmlFor="donation-donor">{fields.label("donor_name")}</Label>
+                    <Input
+                      id="donation-donor"
+                      placeholder="Jane Smith"
+                      value={donorName}
+                      onChange={(e) => setDonorName(e.target.value)}
+                      maxLength={200}
+                      autoFocus
+                    />
+                  </>
+                )}
               </div>
 
               {/* Amount (required, validated above). */}
               <div className="space-y-2">
-                <Label htmlFor="donation-amount">Amount ($)</Label>
+                <Label htmlFor="donation-amount">{fields.label("amount")} ($)</Label>
                 <Input
                   id="donation-amount"
                   type="number"
@@ -708,7 +830,7 @@ export default function DonationsPage() {
 
               {/* Date (required). max prevents accidentally logging a future date. */}
               <div className="space-y-2">
-                <Label htmlFor="donation-date">Date</Label>
+                <Label htmlFor="donation-date">{fields.label("date")}</Label>
                 <Input
                   id="donation-date"
                   type="date"
@@ -720,61 +842,76 @@ export default function DonationsPage() {
             </div>
 
             {/* Campaign (optional) with suggestions from previously used campaigns. */}
-            <div className="space-y-2">
-              <Label htmlFor="donation-campaign">
-                Campaign <span className="text-muted-foreground font-normal">(optional)</span>
-              </Label>
-              <Input
-                id="donation-campaign"
-                placeholder="Annual Fund, Summer Drive..."
-                value={campaign}
-                onChange={(e) => setCampaign(e.target.value)}
-                list="campaign-suggestions"
-                maxLength={100}
-              />
-              <datalist id="campaign-suggestions">
-                {campaignSuggestions.map((c) => (
-                  <option key={c} value={c} />
-                ))}
-              </datalist>
-            </div>
+            {fields.shows("campaign") && (
+              <div className="space-y-2">
+                <Label htmlFor="donation-campaign">
+                  {fields.label("campaign")} <span className="text-muted-foreground font-normal">(optional)</span>
+                </Label>
+                <Input
+                  id="donation-campaign"
+                  placeholder="Annual Fund, Summer Drive..."
+                  value={campaign}
+                  onChange={(e) => setCampaign(e.target.value)}
+                  list="campaign-suggestions"
+                  maxLength={100}
+                />
+                <datalist id="campaign-suggestions">
+                  {campaignSuggestions.map((c) => (
+                    <option key={c} value={c} />
+                  ))}
+                </datalist>
+              </div>
+            )}
 
             {/* Payment method (optional). Includes a "None" option so a choice can be cleared. */}
-            <div className="space-y-2">
-              <Label htmlFor="donation-method">
-                Payment method <span className="text-muted-foreground font-normal">(optional)</span>
-              </Label>
-              <Select
-                value={paymentMethod || NO_METHOD}
-                onValueChange={(v) => setPaymentMethod(v === NO_METHOD ? "" : v)}
-              >
-                <SelectTrigger id="donation-method">
-                  <SelectValue placeholder="Select method..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NO_METHOD}>None</SelectItem>
-                  {PAYMENT_METHODS.map((m) => (
-                    <SelectItem key={m} value={m}>
-                      {m}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {fields.shows("payment_method") && (
+              <div className="space-y-2">
+                <Label htmlFor="donation-method">
+                  {fields.label("payment_method")} <span className="text-muted-foreground font-normal">(optional)</span>
+                </Label>
+                <Select
+                  value={paymentMethod || NO_METHOD}
+                  onValueChange={(v) => setPaymentMethod(v === NO_METHOD ? "" : v)}
+                >
+                  <SelectTrigger id="donation-method">
+                    <SelectValue placeholder="Select method..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_METHOD}>None</SelectItem>
+                    {PAYMENT_METHODS.map((m) => (
+                      <SelectItem key={m} value={m}>
+                        {m}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Organization-defined fields (renders nothing when there are none). */}
+            <CustomFieldInputs
+              fields={fields.custom}
+              values={customValues}
+              onChange={setCustomValues}
+              errors={customErrors}
+              idPrefix="donation-custom"
+            />
 
             {/* Notes (optional). */}
-            <div className="space-y-2">
-              <Label htmlFor="donation-notes">
-                Notes <span className="text-muted-foreground font-normal">(optional)</span>
-              </Label>
-              <Textarea
-                id="donation-notes"
-                placeholder="Any additional notes..."
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                maxLength={1000}
-              />
-            </div>
+            {fields.shows("notes") && (
+              <div className="space-y-2">
+                <Label htmlFor="donation-notes">
+                  {fields.label("notes")} <span className="text-muted-foreground font-normal">(optional)</span>
+                </Label>
+                <Textarea
+                  id="donation-notes"
+                  placeholder="Any additional notes..."
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  maxLength={1000}
+                />
+              </div>
+            )}
           </div>
 
           <DialogFooter>
