@@ -5,8 +5,7 @@
  *   - Free trial:      days left (stronger in the last 7 days)
  *   - Trial ended:     records are read-only until someone subscribes
  *   - Payment failed:  update the card
- * Renders nothing once subscribed, and nothing for demo visitors (DemoBanner
- * covers them).
+ * Renders nothing once subscribed, and nothing for anonymous guest users.
  */
 
 import { useAuth } from "@/hooks/use-auth";

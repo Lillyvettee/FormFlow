@@ -6,7 +6,7 @@
  * "Manage billing" link to Stripe once subscribed.
  *
  * The code field is filled in automatically if this browser was used for
- * the demo (see DemoBanner).
+ * the old guest demo.
  *
  * Only owners and admins can subscribe or manage billing (the Edge Functions
  * enforce this too). Everyone else sees the status and who to ask.
@@ -25,8 +25,10 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useOrganization } from "@/hooks/use-organization";
 import { createBillingPortalSession, createCheckoutSession, type PaidPlan } from "@/lib/stripe";
-import { DEMO_CODE_STORAGE_KEY } from "@/components/demo-banner";
 import { Crown, Check, AlertCircle, ExternalLink } from "lucide-react";
+
+/** Where the old guest demo saved its discount code in this browser. */
+const DEMO_CODE_STORAGE_KEY = "formflow-demo-code";
 
 /** Pricing shown here. Keep in sync with the Pricing section on the landing page and the Stripe prices. */
 const PLANS: {
@@ -64,7 +66,7 @@ const PLAN_NAMES: Record<PaidPlan, string> = { starter: "Starter", mission: "Mis
 const POLL_ATTEMPTS = 8;
 const POLL_INTERVAL_MS = 2000;
 
-/** A code saved by DemoBanner when this browser was used for the demo. */
+/** A code saved when this browser was used for the old guest demo. */
 const savedDemoCode = (): string => {
   try {
     return localStorage.getItem(DEMO_CODE_STORAGE_KEY) ?? "";

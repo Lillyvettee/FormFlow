@@ -7,8 +7,7 @@
  *
  *   Full-page routes (work whether or not you're signed in):
  *     /invite/:token     accept a team invitation
- *     /demo              landing page in demo mode
- *     /login, /signup    shown to signed-out visitors and demo visitors;
+ *     /login, /signup    shown to signed-out visitors;
  *                        signed-in users are sent to the dashboard instead
  *     /forgot-password
  *     /reset-password    where password reset emails land
@@ -16,7 +15,7 @@
  *     /terms, /privacy, /refunds   legal pages (linked from landing, signup
  *                        and the Plan section)
  *
- *   Signed in (real account or demo):
+ *   Signed in:
  *     The sidebar layout, wrapped in OrganizationGate, so the app only appears
  *     once the user belongs to an organization. Dashboard is at "/".
  *
@@ -39,14 +38,12 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { useAuth } from "@/hooks/use-auth";
 import { OrganizationProvider } from "@/hooks/use-organization";
 import { OrganizationGate } from "@/components/organization-gate";
-import { DemoBanner } from "@/components/demo-banner";
 import { BillingBanner } from "@/components/billing-banner";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import NotFound from "@/pages/not-found";
 import LandingPage from "@/pages/landing";
-import DemoPage from "@/pages/demo";
 import DashboardPage from "@/pages/dashboard";
 import FormsPage from "@/pages/forms";
 import ReportsPage from "@/pages/reports";
@@ -105,7 +102,6 @@ function AuthenticatedRouter() {
  * organization sees the full-page setup screen rather than a sidebar full of
  * links that would not work yet.
  *
- * DemoBanner renders only for demo visitors and nothing for real accounts.
  * BillingBanner shows trial days left, read-only mode or a failed payment.
  */
 function AuthenticatedLayout() {
@@ -115,7 +111,6 @@ function AuthenticatedLayout() {
         <div className="flex h-screen w-full">
           <AppSidebar />
           <div className="flex flex-col flex-1 min-w-0">
-            <DemoBanner />
             <BillingBanner />
             <header className="flex items-center justify-between gap-4 p-3 border-b shrink-0 sticky top-0 z-50 bg-background/80 backdrop-blur-lg">
               <SidebarTrigger data-testid="button-sidebar-toggle" />
@@ -180,7 +175,6 @@ function AppContent() {
     <Switch>
       {/* Full-page routes that work for everyone. */}
       <Route path="/invite/:token" component={AcceptInvitePage} />
-      <Route path="/demo" component={DemoPage} />
       <Route path="/forgot-password" component={ForgotPasswordPage} />
       <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/delete-account" component={DeleteAccountPage} />

@@ -11,6 +11,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
 import { useOrganization } from "@/hooks/use-organization";
+import { SampleDataCard } from "@/components/sample-data-card";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import type { Form, InventoryItem } from "@/types/database";
 
@@ -270,6 +271,8 @@ export default function DashboardPage() {
           </Link>
         )}
       </div>
+
+      <SampleDataCard onChanged={retry} />
 
       {/* Load error */}
       {error && (
