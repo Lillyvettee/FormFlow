@@ -39,6 +39,8 @@ import { ReadOnlyNotice } from "@/components/read-only-notice";
 import { friendlyWriteError } from "@/lib/db-errors";
 import { FormAppearanceEditor, appearanceErrors, type AppearanceDraft } from "@/components/form-appearance-editor";
 import { ShareFormDialog } from "@/components/share-form-dialog";
+import { FormTemplatePicker } from "@/components/form-template-picker";
+import type { FormTemplate } from "@/lib/form-templates";
 import { Link } from "wouter";
 import {
   Plus,
@@ -206,6 +208,7 @@ function OptionsInput({
  *
  * Props:
  *   form      - the form being edited, or undefined when creating a new one
+ *   template  - when creating, a ready-made form to start from (lib/form-templates.ts)
  *   userId    - owner id written to the row
  *   allForms  - the user's other forms, used for the follow-up form picker
  *   onClose   - leave the builder (after save or cancel)
@@ -213,12 +216,14 @@ function OptionsInput({
  */
 function FormBuilder({
   form,
+  template,
   userId,
   allForms,
   onClose,
   onSaved,
 }: {
   form?: Form;
+  template?: FormTemplate | null;
   userId: string;
   allForms: Form[];
   onClose: () => void;
@@ -226,32 +231,33 @@ function FormBuilder({
 }) {
   const { toast } = useToast();
 
-  // ----- Form state, pre-filled when editing -----
-  const [title, setTitle] = useState(form?.title ?? "");
-  const [description, setDescription] = useState(form?.description ?? "");
-  const [fields, setFields] = useState<FormField[]>(getFields(form));
-  const [isPublished, setIsPublished] = useState(form?.is_published ?? false);
-  const [followUpFormId, setFollowUpFormId] = useState<string>(getSettings(form).followUpFormId ?? "");
-  const [appearance, setAppearance] = useState<AppearanceDraft>(getAppearanceDraft(form));
+  /**
+   * Starting values, captured once: the form being edited, else the chosen
+   * template (with fresh field ids), else blank. Also compared against the
+   * current values to detect unsaved changes when the user clicks Cancel.
+   */
+  const [initial] = useState(() => ({
+    title: form?.title ?? template?.title ?? "",
+    description: form?.description ?? template?.description ?? "",
+    fields: form ? getFields(form) : (template?.fields ?? []).map((f) => ({ ...f, id: generateId() })),
+    isPublished: form?.is_published ?? false,
+    followUpFormId: getSettings(form).followUpFormId ?? "",
+    appearance: getAppearanceDraft(form),
+  }));
+
+  // ----- Form state -----
+  const [title, setTitle] = useState(initial.title);
+  const [description, setDescription] = useState(initial.description);
+  const [fields, setFields] = useState<FormField[]>(initial.fields);
+  const [isPublished, setIsPublished] = useState(initial.isPublished);
+  const [followUpFormId, setFollowUpFormId] = useState<string>(initial.followUpFormId);
+  const [appearance, setAppearance] = useState<AppearanceDraft>(initial.appearance);
   const [isSaving, setIsSaving] = useState(false);
 
   /** Validation messages are hidden until the user first tries to save. */
   const [showErrors, setShowErrors] = useState(false);
 
-  /**
-   * Snapshot of the starting values, captured once. Compared against the
-   * current values to detect unsaved changes when the user clicks Cancel.
-   */
-  const [initialSnapshot] = useState(() =>
-    JSON.stringify({
-      title: form?.title ?? "",
-      description: form?.description ?? "",
-      fields: getFields(form),
-      isPublished: form?.is_published ?? false,
-      followUpFormId: getSettings(form).followUpFormId ?? "",
-      appearance: getAppearanceDraft(form),
-    }),
-  );
+  const [initialSnapshot] = useState(() => JSON.stringify(initial));
   const isDirty =
     JSON.stringify({ title, description, fields, isPublished, followUpFormId, appearance }) !== initialSnapshot;
 
@@ -722,6 +728,9 @@ export default function FormsPage() {
   const [editingForm, setEditingForm] = useState<Form | null>(null);
   /** True when the builder is open to create a new form. */
   const [showBuilder, setShowBuilder] = useState(false);
+  /** "New form" opens the template picker first; the chosen template (or null for blank) fills the builder. */
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [template, setTemplate] = useState<FormTemplate | null>(null);
   const [previewForm, setPreviewForm] = useState<Form | null>(null);
   /** Form whose Share dialog (link and embed code) is open. */
   const [shareForm, setShareForm] = useState<Form | null>(null);
@@ -875,6 +884,14 @@ export default function FormsPage() {
   const closeBuilder = () => {
     setShowBuilder(false);
     setEditingForm(null);
+    setTemplate(null);
+  };
+
+  /** Template picked (or null for a blank form): open the builder with it. */
+  const startNewForm = (picked: FormTemplate | null) => {
+    setTemplate(picked);
+    setShowTemplates(false);
+    setShowBuilder(true);
   };
 
   // -------------------------------------------------------------------------
@@ -890,8 +907,9 @@ export default function FormsPage() {
         </h1>
         {/* key forces a fresh builder (clean state) when switching between forms. */}
         <FormBuilder
-          key={editingForm?.id ?? "new"}
+          key={editingForm?.id ?? `new-${template?.id ?? "blank"}`}
           form={editingForm ?? undefined}
+          template={editingForm ? null : template}
           userId={user?.id ?? ""}
           allForms={forms}
           onClose={closeBuilder}
@@ -916,7 +934,7 @@ export default function FormsPage() {
           <p className="text-muted-foreground">Create volunteer sign-ups, donation forms, surveys, and more</p>
         </div>
         {canEdit && (
-          <Button onClick={() => setShowBuilder(true)} data-testid="button-create-form">
+          <Button onClick={() => setShowTemplates(true)} data-testid="button-create-form">
             <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> New form
           </Button>
         )}
@@ -1064,12 +1082,15 @@ export default function FormsPage() {
             )}
           </div>
           {canEdit && (
-            <Button onClick={() => setShowBuilder(true)} data-testid="button-create-first-form">
+            <Button onClick={() => setShowTemplates(true)} data-testid="button-create-first-form">
               <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Create first form
             </Button>
           )}
         </div>
       )}
+
+      {/* ===== New form: pick a template or start blank ===== */}
+      <FormTemplatePicker open={showTemplates} onClose={() => setShowTemplates(false)} onPick={startNewForm} />
 
       {/* ===== Share dialog: link and website embed code ===== */}
       <ShareFormDialog form={shareForm} onClose={() => setShareForm(null)} />

@@ -1,154 +1,126 @@
 /**
  * ReportsPage
  *
- * Read-only reports built from the user's donations, volunteer hours,
- * inventory and form submissions, for boards, donors and grant applications.
+ * Reports on the organization's donations, volunteer hours, inventory and
+ * form responses, for staff day to day and for boards, donors and grant
+ * applications.
  *
- * Report tabs:
- *   - Impact overview      headline numbers across everything
- *   - Donation report      totals, trends, campaigns, payment methods
- *   - Volunteer report     hours, top volunteers, activities
- *   - Inventory report     current stock, categories, restock list
- *   - Form submissions     per-form charts, statistics and a searchable table
+ * Tabs:
+ *   - Impact overview   headline numbers, trends, goals, restock alerts
+ *   - Donations         totals, donors (new, returning, top), goals, campaigns
+ *   - Volunteer hours   hours, top volunteers, activities, every session
+ *   - Inventory         current stock, categories, restock list
+ *   - Form responses    every form at a glance, or one form question by question
  *
- * A shared "Report period" filter (All time, This month, This year, custom
- * dates, ...) applies to donations, volunteer hours and form submissions.
- * Inventory is always a snapshot of current stock, so the period does not
- * apply to it.
+ * Period: one shared filter (This month, Last 30 days, custom dates, ...)
+ * for everything except inventory, which is always current. Every number is
+ * compared with the previous period (see getPreviousRange). Only the period
+ * and the one before it are loaded, not all history.
  *
- * Exports:
- *   - CSV: the data behind the current tab, for the current period
- *   - PDF: opens a print-ready page in a new tab and starts the print dialog
- *     (choose "Save as PDF" as the printer)
+ * Data: the whole organization's records (Row Level Security limits rows to
+ * the signed-in member's organization). Sample records from "Load sample
+ * data" are left out.
  *
- * Backend assumptions:
- *   - Tables: forms, donations, volunteer_hours, inventory_items, form_submissions.
- *   - Row Level Security restricts rows to their owner.
+ * Links: the tab, period and form are kept in the address, e.g.
+ * /reports?tab=donations&period=this_month, so a report can be bookmarked
+ * or shared with teammates, and the Dashboard links straight to one.
+ *
+ * Exports: CSV of the data behind the current tab, and a branded printable
+ * report (lib/report-pdf.ts) to save as PDF.
  */
 
-import { useState, useEffect, useMemo, useId, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Link } from "wouter";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import {
-  Download,
-  FileText,
-  FileDown,
-  DollarSign,
-  Clock,
-  Package,
-  TrendingUp,
   AlertTriangle,
-  Search,
-  X,
   CalendarRange,
+  Clock,
+  DollarSign,
+  Download,
+  FileDown,
+  FileText,
+  Info,
+  Package,
+  Search,
+  TrendingUp,
+  Users,
+  X,
   type LucideIcon,
 } from "lucide-react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  AreaChart,
-  Area,
-  LineChart,
-  Line,
-} from "recharts";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
+import { useOrganization } from "@/hooks/use-organization";
 import { useToast } from "@/hooks/use-toast";
-import type { Form, FormField, FormSubmission } from "@/types/database";
-
-// ===========================================================================
-// Row types
-// The original used `any[]` for donations, hours and inventory, so typos in
-// column names compiled without warning. These describe the columns used here.
-// ===========================================================================
-
-interface DonationRow {
-  id: string;
-  donor_name: string;
-  /** Postgres numeric can arrive as a string; always wrap in Number(). */
-  amount: number | string;
-  /** "YYYY-MM-DD" */
-  date: string;
-  campaign: string | null;
-  payment_method: string | null;
-  notes: string | null;
-}
-
-interface VolunteerHourRow {
-  id: string;
-  volunteer_name: string;
-  activity: string | null;
-  hours: number | string;
-  /** "YYYY-MM-DD" */
-  date: string;
-  notes: string | null;
-}
-
-interface InventoryRow {
-  id: string;
-  name: string;
-  category: string | null;
-  quantity: number | string;
-  unit: string | null;
-  condition: string | null;
-  location: string | null;
-  low_stock_threshold?: number | null;
-}
-
-type ReportType = "impact" | "donations" | "volunteers" | "inventory" | "forms";
-type PeriodPreset = "all" | "this_month" | "last_30" | "this_year" | "last_year" | "custom";
-
-/** One point on a time-series chart. */
-interface SeriesPoint {
-  key: string;
-  label: string;
-  value: number;
-}
-
-/** One slice of a donut chart or one row of a breakdown. */
-interface NamedValue {
-  name: string;
-  value: number;
-}
+import {
+  answerFields,
+  buildTimeSeries,
+  CHOICE_FIELD_TYPES,
+  daysInRange,
+  describePeriod,
+  downloadCsv,
+  endOfDayTimestamp,
+  exportFileName,
+  fetchAll,
+  formatAnswer,
+  formatChange,
+  formatCount,
+  formatCurrency,
+  formatDate,
+  formatHours,
+  getAnswer,
+  getPresetRange,
+  getPreviousRange,
+  getQty,
+  getThreshold,
+  granularityLabel,
+  inRange,
+  isLowStock,
+  isOutOfStock,
+  mediaUrl,
+  needsRestock,
+  normalizeName,
+  percentChange,
+  pickGranularity,
+  shorten,
+  startOfDayTimestamp,
+  submittedDate,
+  sumBy,
+  summarizeChoices,
+  summarizeNumbers,
+  TEXT_FIELD_TYPES,
+  toISODate,
+  type DonationRow,
+  type Granularity,
+  type InventoryRow,
+  type PeriodPreset,
+  type VolunteerHourRow,
+} from "@/lib/report-utils";
+import { openPrintableReport, pdfHeading, pdfNote, pdfProgress, pdfStats, pdfTable, type PdfStat } from "@/lib/report-pdf";
+import { ChartCard, COLORS, DANGER_COLOR, DonutChart, EmptyChart, RankedBarChart, StatGrid, TimeSeriesChart } from "@/components/reports/report-ui";
+import { GoalsCard, goalTiming, useGoals } from "@/components/reports/goals-card";
+import { FormReport, FormsOverview, MAX_TABLE_ROWS, fieldsOf } from "@/components/reports/form-report";
+import type { Form, FormSubmission } from "@/types/database";
 
 // ===========================================================================
 // Constants
 // ===========================================================================
 
-/**
- * Palette for multi-series charts (donut slices, etc.). Fixed colors are used
- * here because a chart with many slices needs more distinct colors than the
- * theme provides.
- */
-const COLORS = [
-  "hsl(217, 91%, 35%)",
-  "hsl(195, 80%, 32%)",
-  "hsl(150, 58%, 30%)",
-  "hsl(340, 70%, 45%)",
-  "hsl(40, 85%, 40%)",
-  "hsl(270, 60%, 40%)",
-];
+type ReportType = "impact" | "donations" | "volunteers" | "inventory" | "forms";
 
-const REPORT_TYPES: { value: ReportType; label: string; icon: LucideIcon }[] = [
-  { value: "impact", label: "Impact Overview", icon: TrendingUp },
-  { value: "donations", label: "Donation Report", icon: DollarSign },
-  { value: "volunteers", label: "Volunteer Hours Report", icon: Clock },
-  { value: "inventory", label: "Inventory Report", icon: Package },
-  { value: "forms", label: "Form Submissions Report", icon: FileText },
+const REPORT_TYPES: { value: ReportType; label: string; title: string; icon: LucideIcon }[] = [
+  { value: "impact", label: "Impact overview", title: "Impact Report", icon: TrendingUp },
+  { value: "donations", label: "Donations", title: "Donation Report", icon: DollarSign },
+  { value: "volunteers", label: "Volunteer hours", title: "Volunteer Report", icon: Clock },
+  { value: "inventory", label: "Inventory", title: "Inventory Report", icon: Package },
+  { value: "forms", label: "Form responses", title: "Form Responses Report", icon: FileText },
 ];
 
 const PERIOD_PRESETS: { value: Exclude<PeriodPreset, "custom">; label: string }[] = [
@@ -159,633 +131,203 @@ const PERIOD_PRESETS: { value: Exclude<PeriodPreset, "custom">; label: string }[
   { value: "last_year", label: "Last year" },
 ];
 
-/** Field types summarized as a donut chart of answer counts. */
-const CHOICE_FIELD_TYPES = ["select", "radio", "checkbox"];
-
-/** Default threshold, matching the Inventory page. */
-const DEFAULT_LOW_STOCK_THRESHOLD = 5;
-
-/** Supabase returns at most 1000 rows per request by default. */
-const PAGE_SIZE = 1000;
-
-/** Tables show at most this many rows on screen; exports always include everything. */
-const MAX_TABLE_ROWS = 200;
-
-/** "All forms" option in the form picker. Radix Select cannot use "" as an item value. */
+/** "All forms" option in the form picker. Radix Select can't use "" as an item value. */
 const ALL_FORMS = "__all__";
+const TOP_DONORS = 10;
 
-const AXIS_TICK = { fill: "hsl(var(--muted-foreground))", fontSize: 11 };
-
-const TOOLTIP_STYLE = {
-  backgroundColor: "hsl(var(--popover))",
-  border: "1px solid hsl(var(--border))",
-  borderRadius: "6px",
-  color: "hsl(var(--foreground))",
-};
+/** Submission columns needed only to count the previous period. */
+type SubmissionStub = Pick<FormSubmission, "form_id" | "submitted_at">;
 
 // ===========================================================================
-// Date helpers
-// All report dates are compared as local "YYYY-MM-DD" strings. The original
-// parsed dates with new Date("YYYY-MM-DD"), which is UTC midnight, so date
-// filters were off by one day in US time zones.
+// Address (URL) state
 // ===========================================================================
 
-/** Date -> "YYYY-MM-DD" in local time. */
-const toISODate = (d: Date): string =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-
-/** "YYYY-MM-DD" -> local Date at midnight. */
-const parseLocalDate = (iso: string): Date => {
-  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
-  return new Date(y, (m || 1) - 1, d || 1);
-};
-
-/** "2026-10-01" -> "Oct 1, 2026" */
-const formatDate = (iso: string): string =>
-  iso ? parseLocalDate(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "";
-
-/** A submission's timestamp as a local "YYYY-MM-DD", or "" if missing. */
-const submittedDate = (s: FormSubmission): string => (s.submitted_at ? toISODate(new Date(s.submitted_at)) : "");
-
-/** True if the "YYYY-MM-DD" date is inside the (inclusive) range. Empty bounds are open. */
-const inRange = (iso: string, from: string, to: string): boolean => {
-  if (!iso) return !from && !to;
-  const day = iso.slice(0, 10);
-  return (!from || day >= from) && (!to || day <= to);
-};
-
-/** Start and end dates for a period preset. */
-const getPresetRange = (preset: PeriodPreset): { from: string; to: string } => {
-  const today = new Date();
-  const y = today.getFullYear();
-  switch (preset) {
-    case "this_month":
-      return { from: toISODate(new Date(y, today.getMonth(), 1)), to: toISODate(today) };
-    case "last_30": {
-      const start = new Date(today);
-      start.setDate(start.getDate() - 29);
-      return { from: toISODate(start), to: toISODate(today) };
-    }
-    case "this_year":
-      return { from: toISODate(new Date(y, 0, 1)), to: toISODate(today) };
-    case "last_year":
-      return { from: toISODate(new Date(y - 1, 0, 1)), to: toISODate(new Date(y - 1, 11, 31)) };
-    default:
-      return { from: "", to: "" };
-  }
-};
-
-/** Human-readable description of the selected period, for headers and exports. */
-const describePeriod = (from: string, to: string): string => {
-  if (!from && !to) return "All time";
-  if (from && to) return `${formatDate(from)} to ${formatDate(to)}`;
-  return from ? `From ${formatDate(from)}` : `Through ${formatDate(to)}`;
-};
-
-/**
- * Turn dated values into a continuous time series, summing values per day
- * or per month.
- *
- * Fixes over the original:
- * - Keys are sortable ("2026-10" / "2026-10-12") instead of display strings,
- *   so points are always in date order. The submissions chart was drawn
- *   backwards in time because submissions were loaded newest first.
- * - Daily keys include the year, so Oct 12 of two different years no longer
- *   merge into one point.
- * - Missing days/months are filled with 0. Without this, a line or area chart
- *   draws a straight slope across a gap, implying activity that never happened.
- */
-const buildTimeSeries = (entries: { date: string; value: number }[], granularity: "day" | "month"): SeriesPoint[] => {
-  const valid = entries.filter((e) => /^\d{4}-\d{2}-\d{2}/.test(e.date));
-  if (!valid.length) return [];
-
-  const keyOf = (iso: string) => (granularity === "month" ? iso.slice(0, 7) : iso.slice(0, 10));
-  const totals = new Map<string, number>();
-  for (const e of valid) {
-    const k = keyOf(e.date);
-    totals.set(k, (totals.get(k) ?? 0) + e.value);
-  }
-
-  const keys = Array.from(totals.keys()).sort();
-  const cursor = parseLocalDate(granularity === "month" ? `${keys[0]}-01` : keys[0]);
-  const lastKey = keys[keys.length - 1];
-  const points: SeriesPoint[] = [];
-
-  // The cap guards against a bad date (e.g. year 1900) producing a huge loop.
-  for (let i = 0; i < 2000; i++) {
-    const iso = toISODate(cursor);
-    const key = keyOf(iso);
-    points.push({
-      key,
-      label:
-        granularity === "month"
-          ? cursor.toLocaleDateString("en-US", { month: "short", year: "2-digit" })
-          : cursor.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-      value: Math.round((totals.get(key) ?? 0) * 100) / 100,
-    });
-    if (key >= lastKey) break;
-    if (granularity === "month") cursor.setMonth(cursor.getMonth() + 1);
-    else cursor.setDate(cursor.getDate() + 1);
-  }
-  return points;
-};
-
-/** Daily points for short spans, monthly for anything over about three months. */
-const pickGranularity = (dates: string[]): "day" | "month" => {
-  const sorted = dates.filter(Boolean).sort();
-  if (sorted.length < 2) return "day";
-  const spanDays = (parseLocalDate(sorted[sorted.length - 1]).getTime() - parseLocalDate(sorted[0]).getTime()) / 86400000;
-  return spanDays > 92 ? "month" : "day";
-};
-
-// ===========================================================================
-// Number and grouping helpers
-// ===========================================================================
-
-const currencyFormatter = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
-const formatCurrency = (n: number): string => currencyFormatter.format(n);
-
-/** Hours rounded to one decimal; avoids floating point noise like 10.299999. */
-const formatHours = (n: number): string => (Math.round(n * 10) / 10).toLocaleString("en-US");
-
-/** Sum values by a key, returned largest first. */
-const sumBy = <T,>(rows: T[], keyFn: (row: T) => string, valueFn: (row: T) => number): NamedValue[] => {
-  const totals = new Map<string, number>();
-  for (const row of rows) {
-    const k = keyFn(row);
-    totals.set(k, (totals.get(k) ?? 0) + valueFn(row));
-  }
-  return Array.from(totals, ([name, value]) => ({ name, value: Math.round(value * 100) / 100 })).sort(
-    (a, b) => b.value - a.value,
-  );
-};
-
-/** Lowercase, trimmed name so "Jane Smith" and "jane smith " count as one person. */
-const normalizeName = (name: string): string => name.trim().toLowerCase().replace(/\s+/g, " ");
-
-/** Shorten a label for a chart axis; the tooltip shows the full text. */
-const shorten = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max)}...` : text);
-
-// ----- Inventory helpers (same rules as the Inventory page) -----
-
-const getQty = (i: InventoryRow): number => Number(i.quantity) || 0;
-const getThreshold = (i: InventoryRow): number => i.low_stock_threshold ?? DEFAULT_LOW_STOCK_THRESHOLD;
-const isOutOfStock = (i: InventoryRow): boolean => getQty(i) <= 0;
-/**
- * Above zero but at or below the threshold. The original counted empty items
- * as "low stock" too, so the Low Stock and Out of Stock numbers overlapped.
- */
-const isLowStock = (i: InventoryRow): boolean => getQty(i) > 0 && getQty(i) <= getThreshold(i);
-const needsRestock = (i: InventoryRow): boolean => isLowStock(i) || isOutOfStock(i);
-
-// ----- Form answer helpers -----
-
-/** Raw answer for a field from a submission. */
-const getAnswer = (s: FormSubmission, fieldId: string): unknown =>
-  (s.data as Record<string, unknown> | null)?.[fieldId];
-
-/**
- * Display text for any answer value. Checkbox booleans become Yes/No (the
- * original showed "true"/"false"), lists are joined, and objects are shown as JSON.
- */
-const formatAnswer = (value: unknown): string => {
-  if (value === undefined || value === null || value === "") return "";
-  if (typeof value === "boolean") return value ? "Yes" : "No";
-  if (Array.isArray(value)) return value.map(formatAnswer).join(", ");
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
-};
-
-/** Count answers for a choice field. Multi-select arrays count each option. */
-const summarizeChoices = (field: FormField, subs: FormSubmission[]): NamedValue[] => {
-  const counts = new Map<string, number>();
-  for (const s of subs) {
-    const raw = getAnswer(s, field.id);
-    if (raw === undefined || raw === null || raw === "") continue;
-    for (const v of Array.isArray(raw) ? raw : [raw]) {
-      const k = formatAnswer(v);
-      if (k) counts.set(k, (counts.get(k) ?? 0) + 1);
-    }
-  }
-  return Array.from(counts, ([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
-};
-
-/**
- * Average, min, max and total for a number field.
- * Uses a loop instead of Math.min(...values), which throws a stack overflow
- * on very large arrays.
- */
-const summarizeNumbers = (field: FormField, subs: FormSubmission[]) => {
-  let count = 0;
-  let sum = 0;
-  let min = Infinity;
-  let max = -Infinity;
-  for (const s of subs) {
-    const raw = getAnswer(s, field.id);
-    if (raw === undefined || raw === null || raw === "") continue;
-    const n = Number(raw);
-    if (!Number.isFinite(n)) continue;
-    count++;
-    sum += n;
-    if (n < min) min = n;
-    if (n > max) max = n;
-  }
-  if (!count) return null;
-  return { count, avg: sum / count, min, max, sum };
-};
-
-// ===========================================================================
-// Data loading and export helpers
-// ===========================================================================
-
-/**
- * Fetch every row of a query, one page at a time.
- *
- * Supabase caps each request at 1000 rows by default. The original fetched
- * once, so an organization with more than 1000 donations or submissions got
- * silently incomplete totals in reports meant for boards and grant funders.
- */
-async function fetchAll<T>(
-  buildQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
-): Promise<T[]> {
-  const rows: T[] = [];
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await buildQuery(from, from + PAGE_SIZE - 1);
-    if (error) throw new Error(error.message);
-    rows.push(...(data ?? []));
-    if (!data || data.length < PAGE_SIZE) break;
-  }
-  return rows;
+interface ViewState {
+  tab: ReportType;
+  preset: PeriodPreset;
+  from: string;
+  to: string;
+  formId: string;
 }
 
-/**
- * Escape text for safe insertion into HTML.
- *
- * Security fix: the PDF export built its page by pasting donor names, notes
- * and form answers straight into HTML. Form answers come from the public, so
- * a respondent could submit a <script> or <img onerror> that would run in a
- * window sharing your app's origin, with access to the signed-in session.
- * Every value written into the PDF page now goes through this.
- */
-const escapeHtml = (value: unknown): string =>
-  String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-/**
- * Escape a value for a CSV cell: doubles embedded quotes and neutralizes text
- * starting with = + - @ so spreadsheets do not run it as a formula.
- * The original did neither, and left the "Submitted At" column unquoted even
- * though dates like "10/12/2026, 3:05 PM" contain a comma, which shifted
- * every answer one column to the right.
- */
-const csvCell = (value: unknown): string => {
-  let text = value == null ? "" : String(value);
-  if (typeof value === "string" && /^[=+\-@\t\r]/.test(text)) text = `'${text}`;
-  return `"${text.replace(/"/g, '""')}"`;
+/** Read ?tab=&period=&from=&to=&form= so links open the same report. */
+const readViewFromUrl = (): ViewState => {
+  const p = new URLSearchParams(window.location.search);
+  const tab = REPORT_TYPES.some((r) => r.value === p.get("tab")) ? (p.get("tab") as ReportType) : "impact";
+  const formId = p.get("form") ?? "";
+  const period = p.get("period");
+  if (period === "custom") {
+    const from = DATE.test(p.get("from") ?? "") ? p.get("from")! : "";
+    const to = DATE.test(p.get("to") ?? "") ? p.get("to")! : "";
+    return { tab, preset: "custom", from, to, formId };
+  }
+  const preset = PERIOD_PRESETS.some((x) => x.value === period) ? (period as PeriodPreset) : "this_year";
+  return { tab, preset, ...getPresetRange(preset), formId };
 };
 
-/** Build and download a CSV file. Adds a BOM so Excel reads accented names correctly. */
-const downloadCsv = (filename: string, rows: unknown[][]) => {
-  const csv = rows.map((r) => r.map(csvCell).join(",")).join("\r\n");
-  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  // Revoking immediately can cancel the download in some browsers.
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+const writeViewToUrl = (v: ViewState) => {
+  const p = new URLSearchParams();
+  if (v.tab !== "impact") p.set("tab", v.tab);
+  p.set("period", v.preset);
+  if (v.preset === "custom") {
+    if (v.from) p.set("from", v.from);
+    if (v.to) p.set("to", v.to);
+  }
+  if (v.tab === "forms" && v.formId) p.set("form", v.formId);
+  const next = `${window.location.pathname}?${p.toString()}`;
+  if (next !== `${window.location.pathname}${window.location.search}`) window.history.replaceState(null, "", next);
 };
 
 // ===========================================================================
-// Small presentational components
-// These replace large blocks of chart markup that were copy-pasted several
-// times in the original.
-// ===========================================================================
-
-interface StatItem {
-  label: string;
-  value: ReactNode;
-  icon?: LucideIcon;
-  /** Shows the value in red, e.g. for low stock counts above zero. */
-  danger?: boolean;
-}
-
-/** Grid of headline numbers. */
-function StatGrid({ stats }: { stats: StatItem[] }) {
-  return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-      {stats.map((s) => {
-        const Icon = s.icon;
-        return (
-          <Card key={s.label} className={`p-5 ${s.danger ? "border-destructive/40" : ""}`}>
-            <div className="flex items-start justify-between gap-2 mb-2">
-              <p className="text-xs text-muted-foreground">{s.label}</p>
-              {Icon && (
-                <div className="h-8 w-8 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
-                  <Icon className="h-4 w-4 text-primary" aria-hidden="true" />
-                </div>
-              )}
-            </div>
-            <p className={`text-2xl font-bold ${s.danger ? "text-destructive" : ""}`}>{s.value}</p>
-          </Card>
-        );
-      })}
-    </div>
-  );
-}
-
-/** Card with a heading, used around every chart. */
-function ChartCard({ title, children, className = "" }: { title: string; children: ReactNode; className?: string }) {
-  return (
-    <Card className={`p-6 ${className}`}>
-      <h3 className="font-semibold mb-4">{title}</h3>
-      {children}
-    </Card>
-  );
-}
-
-/** Placeholder shown when a chart has no data. */
-function EmptyChart({ message = "No data for this period" }: { message?: string }) {
-  return <p className="text-sm text-muted-foreground text-center py-12">{message}</p>;
-}
-
-/**
- * Area, bar or line chart of a time series.
- * Each instance gets a unique gradient id; the original reused ids, which
- * breaks the fill when two area charts are on the page at once.
- */
-function TimeSeriesChart({
-  data,
-  kind,
-  color = COLORS[0],
-  seriesName,
-  valueFormatter = (v) => v.toLocaleString("en-US"),
-  yTickFormatter,
-  heightClass = "h-52",
-}: {
-  data: SeriesPoint[];
-  kind: "area" | "bar" | "line";
-  color?: string;
-  seriesName: string;
-  valueFormatter?: (v: number) => string;
-  yTickFormatter?: (v: number) => string;
-  heightClass?: string;
-}) {
-  // useId returns values with colons, which are not valid inside url(#...).
-  const gradientId = `grad-${useId().replace(/:/g, "")}`;
-  if (!data.length) return <EmptyChart />;
-
-  const tooltip = (
-    <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v) => [valueFormatter(Number(v)), seriesName]} />
-  );
-  const grid = <CartesianGrid strokeDasharray="3 3" className="stroke-border" />;
-  const xAxis = <XAxis dataKey="label" tick={AXIS_TICK} minTickGap={12} />;
-  const yAxis = <YAxis tick={AXIS_TICK} tickFormatter={yTickFormatter} width={64} />;
-
-  return (
-    <div className={heightClass}>
-      <ResponsiveContainer width="100%" height="100%">
-        {kind === "area" ? (
-          <AreaChart data={data}>
-            <defs>
-              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor={color} stopOpacity={0.3} />
-                <stop offset="95%" stopColor={color} stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            {grid}
-            {xAxis}
-            {yAxis}
-            {tooltip}
-            <Area type="monotone" dataKey="value" name={seriesName} stroke={color} fill={`url(#${gradientId})`} strokeWidth={2} />
-          </AreaChart>
-        ) : kind === "bar" ? (
-          <BarChart data={data}>
-            {grid}
-            {xAxis}
-            {yAxis}
-            {tooltip}
-            <Bar dataKey="value" name={seriesName} fill={color} radius={[4, 4, 0, 0]} />
-          </BarChart>
-        ) : (
-          <LineChart data={data}>
-            {grid}
-            {xAxis}
-            {yAxis}
-            {tooltip}
-            <Line type="monotone" dataKey="value" name={seriesName} stroke={color} strokeWidth={2} dot={data.length < 40} />
-          </LineChart>
-        )}
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
-/**
- * Donut chart with a color legend underneath.
- * The legend lists the top `legendLimit` entries and says how many more there
- * are, instead of silently cutting the list off as before.
- */
-function DonutChart({
-  data,
-  valueFormatter = (v) => v.toLocaleString("en-US"),
-  legendLimit = 5,
-  heightClass = "h-40",
-  showLabels = false,
-}: {
-  data: NamedValue[];
-  valueFormatter?: (v: number) => string;
-  legendLimit?: number;
-  heightClass?: string;
-  showLabels?: boolean;
-}) {
-  if (!data.length) return <EmptyChart />;
-  const total = data.reduce((s, d) => s + d.value, 0);
-  const hidden = data.length - legendLimit;
-
-  return (
-    <>
-      <div className={heightClass}>
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={data}
-              cx="50%"
-              cy="50%"
-              innerRadius="50%"
-              outerRadius="85%"
-              dataKey="value"
-              nameKey="name"
-              paddingAngle={2}
-              label={showLabels ? ({ percent }) => `${Math.round((percent ?? 0) * 100)}%` : undefined}
-            >
-              {data.map((entry, i) => (
-                <Cell key={entry.name} fill={COLORS[i % COLORS.length]} />
-              ))}
-            </Pie>
-            <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v, name) => [valueFormatter(Number(v)), name]} />
-          </PieChart>
-        </ResponsiveContainer>
-      </div>
-      <ul className="space-y-1 mt-3">
-        {data.slice(0, legendLimit).map((d, i) => (
-          <li key={d.name} className="flex items-center justify-between text-xs gap-2">
-            <span className="flex items-center gap-1.5 min-w-0">
-              <span
-                className="h-2.5 w-2.5 rounded-sm shrink-0"
-                style={{ backgroundColor: COLORS[i % COLORS.length] }}
-                aria-hidden="true"
-              />
-              <span className="truncate" title={d.name}>
-                {d.name}
-              </span>
-            </span>
-            <span className="font-medium whitespace-nowrap">
-              {valueFormatter(d.value)}
-              {total > 0 && <span className="text-muted-foreground font-normal"> ({Math.round((d.value / total) * 100)}%)</span>}
-            </span>
-          </li>
-        ))}
-        {hidden > 0 && <li className="text-xs text-muted-foreground">and {hidden} more</li>}
-      </ul>
-    </>
-  );
-}
-
-// ===========================================================================
-// Page component
+// Page
 // ===========================================================================
 
 export default function ReportsPage() {
   const { user } = useAuth();
+  const { organization, branding } = useOrganization();
   const { toast } = useToast();
 
-  // ----- Raw data -----
-  const [forms, setForms] = useState<Form[]>([]);
-  const [donations, setDonations] = useState<DonationRow[]>([]);
-  const [volunteerHours, setVolunteerHours] = useState<VolunteerHourRow[]>([]);
-  const [inventory, setInventory] = useState<InventoryRow[]>([]);
-  const [allSubmissions, setAllSubmissions] = useState<FormSubmission[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-
-  // ----- View state -----
-  const [reportType, setReportType] = useState<ReportType>("impact");
-  const [selectedFormId, setSelectedFormId] = useState("");
+  // ----- View (kept in the address) -----
+  const [initialView] = useState(readViewFromUrl);
+  const [reportType, setReportType] = useState<ReportType>(initialView.tab);
+  const [periodPreset, setPeriodPreset] = useState<PeriodPreset>(initialView.preset);
+  const [dateFrom, setDateFrom] = useState(initialView.from);
+  const [dateTo, setDateTo] = useState(initialView.to);
+  const [selectedFormId, setSelectedFormId] = useState(initialView.formId);
   const [searchQuery, setSearchQuery] = useState("");
-  const [isExporting, setIsExporting] = useState(false);
 
-  // ----- Report period (shared by all tabs except inventory) -----
-  const [periodPreset, setPeriodPreset] = useState<PeriodPreset>("all");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-
-  // -------------------------------------------------------------------------
-  // Loading
-  // -------------------------------------------------------------------------
-
-  /**
-   * Load everything the reports need.
-   *
-   * Fixes over the original:
-   * - Fetches all pages (see fetchAll), not just the first 1000 rows.
-   * - Errors were ignored and showed as empty reports. Each dataset now loads
-   *   independently, and any that fail are named in a toast.
-   * - With no user, the loading skeleton never went away.
-   * - Ignores results that arrive after the user changed or the page closed.
-   */
   useEffect(() => {
-    if (!user) {
-      setIsLoading(false);
-      return;
-    }
+    writeViewToUrl({ tab: reportType, preset: periodPreset, from: dateFrom, to: dateTo, formId: selectedFormId });
+  }, [reportType, periodPreset, dateFrom, dateTo, selectedFormId]);
+
+  const periodError = dateFrom && dateTo && dateFrom > dateTo ? "The start date is after the end date." : null;
+  const previous = useMemo(() => (periodError ? null : getPreviousRange(periodPreset, dateFrom, dateTo)), [periodPreset, dateFrom, dateTo, periodError]);
+  const periodLabel = describePeriod(dateFrom, dateTo);
+  const compareLabel = previous ? "vs previous period" : undefined;
+
+  // ----- Data -----
+  const [forms, setForms] = useState<Form[]>([]);
+  const [inventory, setInventory] = useState<InventoryRow[]>([]);
+  /** Donations and hours for the period AND the previous period; split below. */
+  const [donations, setDonations] = useState<DonationRow[]>([]);
+  const [hours, setHours] = useState<VolunteerHourRow[]>([]);
+  const [submissions, setSubmissions] = useState<FormSubmission[]>([]);
+  const [previousSubmissions, setPreviousSubmissions] = useState<SubmissionStub[] | null>(null);
+  /** Donors who gave before the period started, to tell new donors from returning ones. */
+  const [priorDonors, setPriorDonors] = useState<Set<string> | null>(null);
+  const [hasSampleData, setHasSampleData] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const goals = useGoals();
+
+  /** Forms and inventory don't depend on the period. Sample records are left out. */
+  useEffect(() => {
+    if (!user) return;
     let cancelled = false;
-    const uid = user.id;
-
-    const load = async () => {
-      setIsLoading(true);
+    (async () => {
       const failed: string[] = [];
-
-      // A secondary order on "id" keeps paging stable when many rows share a date.
-      const [formsRes, donationsRes, hoursRes, inventoryRes] = await Promise.allSettled([
-        fetchAll<Form>((f, t) =>
-          supabase.from("forms").select("*").eq("user_id", uid).eq("is_archived", false).order("created_at").order("id").range(f, t),
-        ),
-        fetchAll<DonationRow>((f, t) =>
-          supabase.from("donations").select("*").eq("user_id", uid).order("date").order("id").range(f, t),
-        ),
-        fetchAll<VolunteerHourRow>((f, t) =>
-          supabase.from("volunteer_hours").select("*").eq("user_id", uid).order("date").order("id").range(f, t),
-        ),
+      const [formsRes, inventoryRes, sampleRes] = await Promise.allSettled([
+        fetchAll<Form>((f, t) => supabase.from("forms").select("*").eq("is_sample", false).order("created_at").order("id").range(f, t)),
         fetchAll<InventoryRow>((f, t) =>
-          supabase.from("inventory_items").select("*").eq("user_id", uid).order("name").order("id").range(f, t),
+          supabase.from("inventory_items").select("*").eq("is_sample", false).order("name").order("id").range(f, t),
         ),
+        supabase.rpc("sample_data_status"),
       ]);
-
-      const take = <T,>(res: PromiseSettledResult<T[]>, label: string): T[] => {
-        if (res.status === "fulfilled") return res.value;
-        failed.push(label);
-        return [];
-      };
-
-      const formList = take(formsRes, "forms");
-      const donationList = take(donationsRes, "donations");
-      const hourList = take(hoursRes, "volunteer hours");
-      const inventoryList = take(inventoryRes, "inventory");
-
-      // Submissions for all of the user's (non-archived) forms.
-      let submissionList: FormSubmission[] = [];
-      if (formList.length) {
-        try {
-          const ids = formList.map((f) => f.id);
-          submissionList = await fetchAll<FormSubmission>((f, t) =>
-            supabase
-              .from("form_submissions")
-              .select("*")
-              .in("form_id", ids)
-              .order("submitted_at", { ascending: false })
-              .order("id")
-              .range(f, t),
-          );
-        } catch {
-          failed.push("form responses");
-        }
-      }
-
       if (cancelled) return;
-      setForms(formList);
-      setDonations(donationList);
-      setVolunteerHours(hourList);
-      setInventory(inventoryList);
-      setAllSubmissions(submissionList);
-      setIsLoading(false);
-
+      if (formsRes.status === "fulfilled") setForms(formsRes.value);
+      else failed.push("forms");
+      if (inventoryRes.status === "fulfilled") setInventory(inventoryRes.value);
+      else failed.push("inventory");
+      setHasSampleData(sampleRes.status === "fulfilled" && sampleRes.value.data === "sample");
       if (failed.length) {
-        toast({
-          title: "Some report data could not be loaded",
-          description: `Missing: ${failed.join(", ")}. Totals below may be incomplete. Refresh to try again.`,
-          variant: "destructive",
-        });
+        toast({ title: "Some report data couldn't be loaded", description: `Missing: ${failed.join(", ")}. Refresh to try again.`, variant: "destructive" });
       }
-    };
-
-    load();
+    })();
     return () => {
       cancelled = true;
     };
   }, [user, toast]);
 
+  /** Donations, hours and responses for the period plus the previous one. */
+  const fetchFrom = previous?.from ?? dateFrom;
+  useEffect(() => {
+    if (!user || periodError) return;
+    let cancelled = false;
+    setIsRefreshing(true);
+
+    (async () => {
+      const failed: string[] = [];
+      const dated = <Q extends { gte: (c: string, v: string) => Q; lte: (c: string, v: string) => Q }>(q: Q): Q => {
+        let out = q;
+        if (fetchFrom) out = out.gte("date", fetchFrom);
+        if (dateTo) out = out.lte("date", dateTo);
+        return out;
+      };
+      const [donationsRes, hoursRes, subsRes, prevSubsRes, priorRes] = await Promise.allSettled([
+        fetchAll<DonationRow>((f, t) =>
+          dated(supabase.from("donations").select("*").eq("is_sample", false)).order("date").order("id").range(f, t),
+        ),
+        fetchAll<VolunteerHourRow>((f, t) =>
+          dated(supabase.from("volunteer_hours").select("*").eq("is_sample", false)).order("date").order("id").range(f, t),
+        ),
+        fetchAll<FormSubmission>((f, t) => {
+          let q = supabase.from("form_submissions").select("*");
+          if (dateFrom) q = q.gte("submitted_at", startOfDayTimestamp(dateFrom));
+          if (dateTo) q = q.lt("submitted_at", endOfDayTimestamp(dateTo));
+          return q.order("submitted_at", { ascending: false }).order("id").range(f, t);
+        }),
+        previous
+          ? fetchAll<SubmissionStub>((f, t) =>
+              supabase
+                .from("form_submissions")
+                .select("form_id, submitted_at")
+                .gte("submitted_at", startOfDayTimestamp(previous.from))
+                .lt("submitted_at", endOfDayTimestamp(previous.to))
+                .order("id")
+                .range(f, t),
+            )
+          : Promise.resolve(null),
+        dateFrom
+          ? fetchAll<{ donor_name: string }>((f, t) =>
+              supabase.from("donations").select("donor_name").eq("is_sample", false).lt("date", dateFrom).order("id").range(f, t),
+            )
+          : Promise.resolve(null),
+      ]);
+      if (cancelled) return;
+
+      if (donationsRes.status === "fulfilled") setDonations(donationsRes.value);
+      else failed.push("donations");
+      if (hoursRes.status === "fulfilled") setHours(hoursRes.value);
+      else failed.push("volunteer hours");
+      if (subsRes.status === "fulfilled") setSubmissions(subsRes.value);
+      else failed.push("form responses");
+      setPreviousSubmissions(prevSubsRes.status === "fulfilled" ? prevSubsRes.value : null);
+      setPriorDonors(
+        priorRes.status === "fulfilled" && priorRes.value ? new Set(priorRes.value.map((d) => normalizeName(d.donor_name))) : null,
+      );
+      setIsLoading(false);
+      setIsRefreshing(false);
+      if (failed.length) {
+        toast({
+          title: "Some report data couldn't be loaded",
+          description: `Missing: ${failed.join(", ")}. Totals may be incomplete. Refresh to try again.`,
+          variant: "destructive",
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // `previous` is derived from these values.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, fetchFrom, dateFrom, dateTo, periodError, toast]);
+
   // -------------------------------------------------------------------------
   // Period controls
   // -------------------------------------------------------------------------
 
-  /** Pick a preset period; fills in the from/to dates. */
   const applyPreset = (preset: PeriodPreset) => {
     setPeriodPreset(preset);
     if (preset !== "custom") {
@@ -802,114 +344,153 @@ export default function ReportsPage() {
     else setDateTo(value);
   };
 
-  const periodLabel = describePeriod(dateFrom, dateTo);
-  const periodError = dateFrom && dateTo && dateFrom > dateTo ? "The start date is after the end date." : null;
-
   // -------------------------------------------------------------------------
-  // Period-filtered data
+  // Shared derived values
   // -------------------------------------------------------------------------
 
-  const periodDonations = useMemo(
-    () => donations.filter((d) => inRange(d.date, dateFrom, dateTo)),
-    [donations, dateFrom, dateTo],
-  );
-  const periodHours = useMemo(
-    () => volunteerHours.filter((v) => inRange(v.date, dateFrom, dateTo)),
-    [volunteerHours, dateFrom, dateTo],
-  );
-  const periodSubmissions = useMemo(
-    () => allSubmissions.filter((s) => inRange(submittedDate(s), dateFrom, dateTo)),
-    [allSubmissions, dateFrom, dateTo],
+  const formsById = useMemo(() => new Map(forms.map((f) => [f.id, f])), [forms]);
+
+  const inPeriod = useCallback((iso: string) => inRange(iso, dateFrom, dateTo), [dateFrom, dateTo]);
+  const inPrevious = useCallback((iso: string) => Boolean(previous) && inRange(iso, previous!.from, previous!.to), [previous]);
+
+  const periodDonations = useMemo(() => donations.filter((d) => inPeriod(d.date)), [donations, inPeriod]);
+  const prevDonations = useMemo(() => (previous ? donations.filter((d) => inPrevious(d.date)) : null), [donations, inPrevious, previous]);
+  const periodHours = useMemo(() => hours.filter((v) => inPeriod(v.date)), [hours, inPeriod]);
+  const prevHours = useMemo(() => (previous ? hours.filter((v) => inPrevious(v.date)) : null), [hours, inPrevious, previous]);
+  /** Responses to forms in this organization's real (non-sample) forms. */
+  const periodSubmissions = useMemo(() => submissions.filter((s) => formsById.has(s.form_id)), [submissions, formsById]);
+  const prevSubmissions = useMemo(
+    () => (previousSubmissions ? previousSubmissions.filter((s) => formsById.has(s.form_id)) : null),
+    [previousSubmissions, formsById],
   );
 
+  /** The range charts cover: the period, or for "All time" the span of the data. */
+  const chartRange = useMemo(() => {
+    if (dateFrom && dateTo) return { from: dateFrom, to: dateTo };
+    const dates = [...periodDonations.map((d) => d.date), ...periodHours.map((v) => v.date), ...periodSubmissions.map(submittedDate)]
+      .filter(Boolean)
+      .sort();
+    if (!dates.length) return undefined;
+    return { from: dateFrom || dates[0], to: dateTo || toISODate(new Date()) };
+  }, [dateFrom, dateTo, periodDonations, periodHours, periodSubmissions]);
+  const granularity: Granularity = chartRange ? pickGranularity(chartRange.from, chartRange.to) : "month";
+
   // -------------------------------------------------------------------------
-  // Donation figures
+  // Donations
   // -------------------------------------------------------------------------
 
   const donationStats = useMemo(() => {
-    const total = periodDonations.reduce((s, d) => s + Number(d.amount), 0);
-    return {
-      total,
-      count: periodDonations.length,
-      uniqueDonors: new Set(periodDonations.map((d) => normalizeName(d.donor_name))).size,
-      average: periodDonations.length ? total / periodDonations.length : 0,
-      byMonth: buildTimeSeries(periodDonations.map((d) => ({ date: d.date, value: Number(d.amount) })), "month"),
-      byCampaign: sumBy(periodDonations, (d) => d.campaign?.trim() || "General", (d) => Number(d.amount)),
-      // Counted by number of gifts AND amount, so both are available.
-      byMethodCount: sumBy(periodDonations, (d) => d.payment_method || "Unknown", () => 1),
+    const summarize = (rows: DonationRow[]) => {
+      const total = rows.reduce((s, d) => s + Number(d.amount), 0);
+      const donors = new Set(rows.map((d) => normalizeName(d.donor_name)));
+      return { total, count: rows.length, donors: donors.size, average: rows.length ? total / rows.length : 0 };
     };
-  }, [periodDonations]);
+    const current = summarize(periodDonations);
+    const prev = prevDonations ? summarize(prevDonations) : null;
 
-  /** Newest first for the on-screen table. */
+    // Per donor: total, gifts, last gift, and the spelling used most recently.
+    const byDonor = new Map<string, { name: string; total: number; gifts: number; last: string }>();
+    for (const d of periodDonations) {
+      const key = normalizeName(d.donor_name);
+      const row = byDonor.get(key) ?? { name: d.donor_name.trim(), total: 0, gifts: 0, last: "" };
+      row.total += Number(d.amount);
+      row.gifts += 1;
+      if (d.date >= row.last) {
+        row.last = d.date;
+        row.name = d.donor_name.trim();
+      }
+      byDonor.set(key, row);
+    }
+    const donorRows = Array.from(byDonor, ([key, v]) => ({ key, ...v, isNew: priorDonors ? !priorDonors.has(key) : null })).sort(
+      (a, b) => b.total - a.total,
+    );
+    const newDonors = priorDonors ? donorRows.filter((d) => d.isNew).length : null;
+
+    return {
+      ...current,
+      prev,
+      newDonors,
+      returningDonors: newDonors == null ? null : donorRows.length - newDonors,
+      repeatDonors: donorRows.filter((d) => d.gifts > 1).length,
+      topDonors: donorRows.slice(0, TOP_DONORS),
+      series: buildTimeSeries(periodDonations.map((d) => ({ date: d.date, value: Number(d.amount) })), granularity, chartRange),
+      byCampaign: sumBy(periodDonations, (d) => d.campaign?.trim() || "General", (d) => Number(d.amount)),
+      byMethod: sumBy(periodDonations, (d) => d.payment_method?.trim() || "Unknown", () => 1),
+    };
+  }, [periodDonations, prevDonations, priorDonors, granularity, chartRange]);
+
   const donationsNewestFirst = useMemo(
     () => [...periodDonations].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)),
     [periodDonations],
   );
 
+  /** Every campaign name used, suggested when adding a goal. */
+  const campaignNames = useMemo(
+    () => Array.from(new Set(donations.map((d) => d.campaign?.trim()).filter((c): c is string => Boolean(c)))).sort(),
+    [donations],
+  );
+
   // -------------------------------------------------------------------------
-  // Volunteer figures
+  // Volunteer hours
   // -------------------------------------------------------------------------
 
   const volunteerStats = useMemo(() => {
-    const totalHours = periodHours.reduce((s, v) => s + Number(v.hours), 0);
+    const summarize = (rows: VolunteerHourRow[]) => {
+      const total = rows.reduce((s, v) => s + Number(v.hours), 0);
+      return {
+        totalHours: total,
+        volunteers: new Set(rows.map((v) => normalizeName(v.volunteer_name))).size,
+        sessions: rows.length,
+        average: rows.length ? total / rows.length : 0,
+      };
+    };
     const byVolunteer = sumBy(periodHours, (v) => v.volunteer_name.trim(), (v) => Number(v.hours));
     return {
-      totalHours,
-      volunteers: new Set(periodHours.map((v) => normalizeName(v.volunteer_name))).size,
-      sessions: periodHours.length,
-      average: periodHours.length ? totalHours / periodHours.length : 0,
-      // Full name kept for the tooltip; short label for the axis.
-      top: byVolunteer.slice(0, 10).map((v) => ({ fullName: v.name, label: shorten(v.name, 14), hours: v.value })),
+      ...summarize(periodHours),
+      prev: prevHours ? summarize(prevHours) : null,
       allVolunteers: byVolunteer,
+      top: byVolunteer.slice(0, 10).map((v) => ({ label: shorten(v.name, 16), fullName: v.name, value: v.value })),
       byActivity: sumBy(periodHours, (v) => v.activity?.trim() || "Other", (v) => Number(v.hours)),
-      byMonth: buildTimeSeries(periodHours.map((v) => ({ date: v.date, value: Number(v.hours) })), "month"),
+      series: buildTimeSeries(periodHours.map((v) => ({ date: v.date, value: Number(v.hours) })), granularity, chartRange),
+      newestFirst: [...periodHours].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)),
     };
-  }, [periodHours]);
+  }, [periodHours, prevHours, granularity, chartRange]);
 
   // -------------------------------------------------------------------------
-  // Inventory figures (current snapshot; not affected by the period)
+  // Inventory (current snapshot; the period doesn't apply)
   // -------------------------------------------------------------------------
 
   const inventoryStats = useMemo(() => {
-    const lowItems = inventory.filter(isLowStock);
-    const outItems = inventory.filter(isOutOfStock);
+    const restock = inventory.filter(needsRestock).sort((a, b) => getQty(a) / getThreshold(a) - getQty(b) / getThreshold(b));
     return {
       total: inventory.length,
-      low: lowItems.length,
-      out: outItems.length,
-      restock: inventory.filter(needsRestock).sort((a, b) => getQty(a) - getQty(b)),
+      units: inventory.reduce((s, i) => s + getQty(i), 0),
+      low: inventory.filter(isLowStock).length,
+      out: inventory.filter(isOutOfStock).length,
+      restock,
       byCategory: sumBy(inventory, (i) => i.category?.trim() || "Uncategorized", () => 1),
-      chart: inventory.map((i) => ({
-        id: i.id,
-        fullName: i.name,
-        label: shorten(i.name, 12),
-        quantity: getQty(i),
-        unit: i.unit,
-        restock: needsRestock(i),
-      })),
+      // Lowest stock first, relative to each item's own restock level.
+      lowest: [...inventory]
+        .sort((a, b) => getQty(a) / Math.max(getThreshold(a), 1) - getQty(b) / Math.max(getThreshold(b), 1))
+        .slice(0, 15)
+        .map((i) => ({
+          label: shorten(i.name, 16),
+          fullName: `${i.name} (restock at ${getThreshold(i)})`,
+          value: getQty(i),
+          color: needsRestock(i) ? DANGER_COLOR : COLORS[0],
+        })),
     };
   }, [inventory]);
 
   // -------------------------------------------------------------------------
-  // Form figures
+  // Forms
   // -------------------------------------------------------------------------
 
-  const selectedForm = forms.find((f) => f.id === selectedFormId);
-  const formFields = useMemo(() => (selectedForm?.fields as FormField[] | null) ?? [], [selectedForm]);
-
-  /**
-   * Submissions for the selected form, within the period.
-   * The original made a second request every time a form was picked, with no
-   * protection against an older response overwriting a newer one when
-   * switching forms quickly. All submissions are already loaded, so this
-   * just filters them.
-   */
+  const selectedForm = selectedFormId ? formsById.get(selectedFormId) : undefined;
   const formSubmissions = useMemo(
-    () => (selectedFormId ? periodSubmissions.filter((s) => s.form_id === selectedFormId) : []),
-    [periodSubmissions, selectedFormId],
+    () => (selectedForm ? periodSubmissions.filter((s) => s.form_id === selectedForm.id) : []),
+    [periodSubmissions, selectedForm],
   );
-
-  /** formSubmissions narrowed by the search box (matches any answer). */
   const filteredSubmissions = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return formSubmissions;
@@ -917,87 +498,140 @@ export default function ReportsPage() {
       Object.values((s.data as Record<string, unknown>) ?? {}).some((v) => formatAnswer(v).toLowerCase().includes(q)),
     );
   }, [formSubmissions, searchQuery]);
+  const previousFormCounts = useMemo(() => {
+    if (!prevSubmissions) return null;
+    const m = new Map<string, number>();
+    for (const s of prevSubmissions) m.set(s.form_id, (m.get(s.form_id) ?? 0) + 1);
+    return m;
+  }, [prevSubmissions]);
 
-  /** Submissions-over-time series; daily for short spans, monthly for long ones. */
-  const submissionsSeries = useMemo(() => {
-    const dates = filteredSubmissions.map(submittedDate);
-    return buildTimeSeries(dates.map((date) => ({ date, value: 1 })), pickGranularity(dates));
-  }, [filteredSubmissions]);
+  /** Last 7 days and latest response for the selected form, whatever the period. */
+  const [recent, setRecent] = useState<{ last7: number | null; latest: string | null }>({ last7: null, latest: null });
+  useEffect(() => {
+    if (!selectedForm) return;
+    let cancelled = false;
+    const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+    Promise.all([
+      supabase.from("form_submissions").select("id", { count: "exact", head: true }).eq("form_id", selectedForm.id).gte("submitted_at", weekAgo),
+      supabase.from("form_submissions").select("submitted_at").eq("form_id", selectedForm.id).order("submitted_at", { ascending: false }).limit(1),
+    ]).then(([countRes, latestRes]) => {
+      if (cancelled) return;
+      setRecent({ last7: countRes.count ?? null, latest: latestRes.data?.[0]?.submitted_at ?? null });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedForm]);
 
-  /**
-   * Recent activity for the selected form. Uses all of its submissions,
-   * ignoring the period, since "last 7 days" is always relative to today.
-   * Labeled "Last 7/30 days"; the original called these "This Week" and
-   * "This Month" while actually counting rolling windows.
-   */
-  const recentCounts = useMemo(() => {
-    const forForm = allSubmissions.filter((s) => s.form_id === selectedFormId);
-    const now = Date.now();
-    const within = (days: number) =>
-      forForm.filter((s) => s.submitted_at && now - new Date(s.submitted_at).getTime() <= days * 86400000).length;
-    const latest = forForm.reduce<string | null>(
-      (max, s) => (s.submitted_at && (!max || s.submitted_at > max) ? s.submitted_at : max),
-      null,
-    );
-    return { last7: within(7), last30: within(30), latest };
-  }, [allSubmissions, selectedFormId]);
-
-  /** Responses per form within the period, for the "All forms" overview chart. */
-  const submissionsPerForm = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const s of periodSubmissions) counts.set(s.form_id, (counts.get(s.form_id) ?? 0) + 1);
-    return forms
-      .map((f) => ({ id: f.id, fullName: f.title, label: shorten(f.title, 16), submissions: counts.get(f.id) ?? 0 }))
-      .sort((a, b) => b.submissions - a.submissions);
-  }, [forms, periodSubmissions]);
-
-  const choiceFields = formFields.filter((f) => CHOICE_FIELD_TYPES.includes(f.type));
-  const numberFields = formFields.filter((f) => f.type === "number");
-
-  /** Switching forms clears the search, since it rarely applies to another form. */
   const selectForm = (value: string) => {
     setSelectedFormId(value === ALL_FORMS ? "" : value);
     setSearchQuery("");
   };
 
+  // Forms in the picker: active first, then archived.
+  const pickerForms = useMemo(
+    () => [...forms].sort((a, b) => Number(a.is_archived) - Number(b.is_archived) || a.title.localeCompare(b.title)),
+    [forms],
+  );
+
   // -------------------------------------------------------------------------
-  // CSV export
+  // Highlights (plain-language summary for the printed report)
   // -------------------------------------------------------------------------
 
-  /** Whether the current tab has anything to export. Buttons are disabled otherwise. */
+  const changeWords = (current: number, prev: number | null | undefined) => {
+    const c = percentChange(current, prev);
+    if (c == null || Math.round(c * 100) === 0) return "";
+    return `, ${c > 0 ? "up" : "down"} ${Math.abs(Math.round(c * 100))}% from the previous period`;
+  };
+  const periodIntro = dateFrom && dateTo ? `From ${formatDate(dateFrom)} to ${formatDate(dateTo)}` : dateFrom ? `Since ${formatDate(dateFrom)}` : "To date";
+
+  const highlights = (): string[] => {
+    const lines: string[] = [];
+    const d = donationStats;
+    const v = volunteerStats;
+    if (reportType === "impact" || reportType === "donations") {
+      lines.push(
+        d.count
+          ? `${periodIntro}, ${formatCount(d.donors)} ${d.donors === 1 ? "donor" : "donors"} gave ${formatCurrency(d.total)} across ${formatCount(d.count)} ${
+              d.count === 1 ? "gift" : "gifts"
+            }${changeWords(d.total, d.prev?.total)}.`
+          : `${periodIntro}, no donations were recorded.`,
+      );
+      if (d.newDonors) lines.push(`${formatCount(d.newDonors)} of them gave for the first time.`);
+    }
+    if (reportType === "impact" || reportType === "volunteers") {
+      lines.push(
+        v.sessions
+          ? `${formatCount(v.volunteers)} ${v.volunteers === 1 ? "volunteer" : "volunteers"} contributed ${formatHours(v.totalHours)} hours over ${formatCount(
+              v.sessions,
+            )} ${v.sessions === 1 ? "session" : "sessions"}${changeWords(v.totalHours, v.prev?.totalHours)}.`
+          : `No volunteer hours were logged${dateFrom ? " in this period" : ""}.`,
+      );
+    }
+    if (reportType === "impact") {
+      lines.push(`${formatCount(periodSubmissions.length)} form ${periodSubmissions.length === 1 ? "response was" : "responses were"} received${changeWords(periodSubmissions.length, prevSubmissions?.length)}.`);
+      if (inventoryStats.restock.length) lines.push(`${formatCount(inventoryStats.restock.length)} inventory items need restocking.`);
+    }
+    if ((reportType === "impact" || reportType === "donations") && goals.status === "ready") {
+      const today = toISODate(new Date());
+      for (const g of goals.goals.filter((x) => x.start_date <= today && today <= x.end_date).slice(0, 3)) {
+        lines.push(`Goal "${g.name}": ${formatCurrency(g.raised)} of ${formatCurrency(g.target_amount)} raised (${Math.round((g.raised / g.target_amount) * 100)}%), ${goalTiming(g).toLowerCase()}.`);
+      }
+    }
+    if (reportType === "inventory") {
+      lines.push(
+        `${formatCount(inventoryStats.total)} items are tracked across ${formatCount(inventoryStats.byCategory.length)} ${
+          inventoryStats.byCategory.length === 1 ? "category" : "categories"
+        }. ${inventoryStats.out ? `${formatCount(inventoryStats.out)} are out of stock and ` : ""}${formatCount(inventoryStats.low)} are running low.`,
+      );
+    }
+    if (reportType === "forms") {
+      if (selectedForm) {
+        lines.push(`${periodIntro}, "${selectedForm.title}" received ${formatCount(filteredSubmissions.length)} ${filteredSubmissions.length === 1 ? "response" : "responses"}${searchQuery.trim() ? ` matching "${searchQuery.trim()}"` : changeWords(formSubmissions.length, previousFormCounts?.get(selectedForm.id))}.`);
+      } else {
+        lines.push(`${periodIntro}, your forms received ${formatCount(periodSubmissions.length)} responses${changeWords(periodSubmissions.length, prevSubmissions?.length)}.`);
+      }
+    }
+    return lines;
+  };
+
+  // -------------------------------------------------------------------------
+  // Exports
+  // -------------------------------------------------------------------------
+
+  const orgName = organization?.name ?? "Your organization";
+  const tabInfo = REPORT_TYPES.find((r) => r.value === reportType)!;
+  const panelRef = useRef<HTMLDivElement>(null);
+
   const canExport =
-    reportType === "impact" ||
-    (reportType === "donations" && periodDonations.length > 0) ||
-    (reportType === "volunteers" && periodHours.length > 0) ||
-    (reportType === "inventory" && inventory.length > 0) ||
-    (reportType === "forms" && Boolean(selectedForm) && filteredSubmissions.length > 0);
+    !periodError &&
+    (reportType === "impact" ||
+      (reportType === "donations" && periodDonations.length > 0) ||
+      (reportType === "volunteers" && periodHours.length > 0) ||
+      (reportType === "inventory" && inventory.length > 0) ||
+      (reportType === "forms" && (selectedForm ? filteredSubmissions.length > 0 : forms.length > 0)));
 
-  /**
-   * Download the current tab's data as CSV.
-   *
-   * Fixes over the original:
-   * - The Impact tab produced no file at all; it now exports a summary.
-   * - Values are escaped properly (see csvCell).
-   * - Forms export the submissions you see (search and period applied).
-   * - File names include the date so repeated exports do not overwrite each other.
-   */
   const exportCSV = () => {
     if (!canExport) return;
-    const stamp = toISODate(new Date());
     let rows: unknown[][] = [];
-
+    const vsPrev = (cur: number, prev: number | null | undefined) => {
+      const c = percentChange(cur, prev);
+      return c == null ? "" : formatChange(c);
+    };
     switch (reportType) {
       case "impact":
         rows = [
+          ["Organization", orgName],
           ["Report period", periodLabel],
+          ...(previous ? [["Compared with", describePeriod(previous.from, previous.to)]] : []),
           [],
-          ["Metric", "Value"],
-          ["Total raised", donationStats.total.toFixed(2)],
-          ["Donations", donationStats.count],
-          ["Unique donors", donationStats.uniqueDonors],
-          ["Volunteer hours", formatHours(volunteerStats.totalHours)],
-          ["Volunteers", volunteerStats.volunteers],
-          ["Form responses", periodSubmissions.length],
+          ["Metric", "This period", ...(previous ? ["Previous period", "Change"] : [])],
+          ["Total raised", donationStats.total.toFixed(2), ...(previous ? [donationStats.prev?.total.toFixed(2), vsPrev(donationStats.total, donationStats.prev?.total)] : [])],
+          ["Donations", donationStats.count, ...(previous ? [donationStats.prev?.count, vsPrev(donationStats.count, donationStats.prev?.count)] : [])],
+          ["Donors", donationStats.donors, ...(previous ? [donationStats.prev?.donors, vsPrev(donationStats.donors, donationStats.prev?.donors)] : [])],
+          ["Volunteer hours", formatHours(volunteerStats.totalHours), ...(previous ? [formatHours(volunteerStats.prev?.totalHours ?? 0), vsPrev(volunteerStats.totalHours, volunteerStats.prev?.totalHours)] : [])],
+          ["Volunteers", volunteerStats.volunteers, ...(previous ? [volunteerStats.prev?.volunteers, vsPrev(volunteerStats.volunteers, volunteerStats.prev?.volunteers)] : [])],
+          ["Form responses", periodSubmissions.length, ...(previous ? [prevSubmissions?.length ?? "", vsPrev(periodSubmissions.length, prevSubmissions?.length)] : [])],
           ["Inventory items (current)", inventoryStats.total],
           [],
           ["Campaign", "Total raised"],
@@ -1010,25 +644,18 @@ export default function ReportsPage() {
       case "donations":
         rows = [
           ["Donor", "Amount", "Date", "Campaign", "Payment Method", "Notes"],
-          ...periodDonations.map((d) => [
-            d.donor_name,
-            Number(d.amount).toFixed(2),
-            d.date,
-            d.campaign ?? "",
-            d.payment_method ?? "",
-            d.notes ?? "",
-          ]),
+          ...donationsNewestFirst.map((d) => [d.donor_name, Number(d.amount).toFixed(2), d.date, d.campaign ?? "", d.payment_method ?? "", d.notes ?? ""]),
         ];
         break;
       case "volunteers":
         rows = [
           ["Volunteer", "Activity", "Hours", "Date", "Notes"],
-          ...periodHours.map((v) => [v.volunteer_name, v.activity ?? "", Number(v.hours), v.date, v.notes ?? ""]),
+          ...volunteerStats.newestFirst.map((v) => [v.volunteer_name, v.activity ?? "", Number(v.hours), v.date, v.notes ?? ""]),
         ];
         break;
       case "inventory":
         rows = [
-          ["Name", "Category", "Quantity", "Unit", "Condition", "Location", "Low Stock Threshold", "Status"],
+          ["Name", "Category", "Quantity", "Unit", "Condition", "Location", "Restock At", "Status"],
           ...inventory.map((i) => [
             i.name,
             i.category ?? "",
@@ -1042,239 +669,258 @@ export default function ReportsPage() {
         ];
         break;
       case "forms":
-        rows = [
-          ["Submitted At", ...formFields.map((f) => f.label)],
-          ...filteredSubmissions.map((s) => [
-            s.submitted_at ? new Date(s.submitted_at).toLocaleString("en-US") : "",
-            ...formFields.map((f) => formatAnswer(getAnswer(s, f.id))),
-          ]),
-        ];
+        if (selectedForm) {
+          const fields = fieldsOf(selectedForm);
+          rows = [
+            ["Submitted At", ...fields.map((f) => f.label)],
+            ...filteredSubmissions.map((s) => [
+              s.submitted_at ? new Date(s.submitted_at).toLocaleString("en-US") : "",
+              ...fields.map((f) => formatAnswer(getAnswer(s, f.id))),
+            ]),
+          ];
+        } else {
+          const counts = new Map<string, number>();
+          for (const s of periodSubmissions) counts.set(s.form_id, (counts.get(s.form_id) ?? 0) + 1);
+          rows = [
+            ["Form", "Status", "Responses", ...(previousFormCounts ? ["Previous period", "Change"] : [])],
+            ...pickerForms.map((f) => [
+              f.title,
+              f.is_archived ? "Archived" : f.is_published ? "Published" : "Draft",
+              counts.get(f.id) ?? 0,
+              ...(previousFormCounts ? [previousFormCounts.get(f.id) ?? 0, vsPrev(counts.get(f.id) ?? 0, previousFormCounts.get(f.id) ?? 0)] : []),
+            ]),
+          ];
+        }
         break;
     }
-
-    const name = reportType === "forms" && selectedForm ? `form-${selectedForm.title}` : reportType;
-    const safeName = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-    downloadCsv(`${safeName}-report-${stamp}.csv`, rows);
+    const label = reportType === "forms" && selectedForm ? `form ${selectedForm.title}` : reportType;
+    downloadCsv(exportFileName([orgName, label], "csv"), rows);
   };
 
-  // -------------------------------------------------------------------------
-  // PDF export
-  // -------------------------------------------------------------------------
-
-  /**
-   * Open a print-ready report in a new tab and start the print dialog.
-   *
-   * Fixes over the original:
-   * - All user data is HTML-escaped (see escapeHtml). This closes a
-   *   cross-site scripting hole via public form submissions.
-   * - The page also gets a Content-Security-Policy that blocks scripts
-   *   entirely, as a second layer of protection.
-   * - The report title was mangled by a regex ("Impact Overview" printed as
-   *   "Overview", and three reports were all titled "Report").
-   * - A blocked pop-up now shows a message instead of failing silently.
-   * - Printing waits for the page to load instead of a fixed 600ms delay.
-   * - Reports include the selected period, and the forms report prints the
-   *   submissions you see on screen (search and period applied).
-   */
   const exportPDF = () => {
     if (!canExport) return;
-    setIsExporting(true);
-
-    const w = window.open("", "_blank");
-    if (!w) {
-      setIsExporting(false);
-      toast({
-        title: "Pop-up blocked",
-        description: "Allow pop-ups for this site to export a PDF, then try again.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const h = escapeHtml;
-    const generated = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
-    const reportLabel = REPORT_TYPES.find((r) => r.value === reportType)?.label ?? "Report";
-
-    /** Row of headline numbers. Values are escaped here. */
-    const statBlock = (items: [string, string | number][]) =>
-      `<div class="stats-row">${items
-        .map(([label, value]) => `<div class="stat"><strong>${h(value)}</strong><span>${h(label)}</span></div>`)
-        .join("")}</div>`;
-
-    /** Table with every cell escaped here, so no call site can forget. */
-    const tableBlock = (headers: string[], rows: (string | number)[][], highlightRow?: (i: number) => boolean) =>
-      `<table><thead><tr>${headers.map((x) => `<th>${h(x)}</th>`).join("")}</tr></thead><tbody>${rows
-        .map(
-          (r, i) =>
-            `<tr${highlightRow?.(i) ? ' class="highlight"' : ""}>${r.map((c) => `<td>${h(c)}</td>`).join("")}</tr>`,
-        )
-        .join("")}</tbody></table>`;
+    const stat = (label: string, value: string, cur?: number, prev?: number | null): PdfStat => {
+      const c = cur == null ? null : percentChange(cur, prev);
+      return { label, value, change: c == null || !previous ? null : `${formatChange(c)} vs previous period` };
+    };
+    const goalsHtml = () => {
+      if (goals.status !== "ready" || !goals.goals.length) return "";
+      return (
+        pdfHeading("Fundraising goals") +
+        goals.goals
+          .map((g) =>
+            pdfProgress(
+              g.name + (g.campaign ? ` (${g.campaign})` : ""),
+              `${formatCurrency(g.raised)} of ${formatCurrency(g.target_amount)} · ${Math.round((g.raised / g.target_amount) * 100)}% · ${goalTiming(g)}`,
+              (g.raised / g.target_amount) * 100,
+              branding.primaryColor ?? "",
+            ),
+          )
+          .join("")
+      );
+    };
 
     let body = "";
+    const d = donationStats;
+    const v = volunteerStats;
     switch (reportType) {
       case "impact":
-        body = `
-          <h2>Organization impact summary</h2>
-          ${statBlock([
-            ["Total raised", formatCurrency(donationStats.total)],
-            ["Volunteer hours", formatHours(volunteerStats.totalHours)],
-            ["Form responses", periodSubmissions.length.toLocaleString("en-US")],
-            ["Inventory items", inventoryStats.total.toLocaleString("en-US")],
-          ])}
-          <h2>Donations by campaign</h2>
-          ${tableBlock(["Campaign", "Total"], donationStats.byCampaign.map((c) => [c.name, formatCurrency(c.value)]))}
-          <h2>Top volunteers</h2>
-          ${tableBlock(["Volunteer", "Hours"], volunteerStats.top.map((v) => [v.fullName, formatHours(v.hours)]))}
-        `;
+        body =
+          pdfStats([
+            stat("Total raised", formatCurrency(d.total), d.total, d.prev?.total),
+            stat("Volunteer hours", formatHours(v.totalHours), v.totalHours, v.prev?.totalHours),
+            stat("Form responses", formatCount(periodSubmissions.length), periodSubmissions.length, prevSubmissions?.length),
+            stat("Donors", formatCount(d.donors), d.donors, d.prev?.donors),
+          ]) +
+          goalsHtml() +
+          pdfHeading("Donations by campaign") +
+          pdfTable(["Campaign", "Total"], d.byCampaign.map((c) => [c.name, formatCurrency(c.value)])) +
+          pdfHeading("Top volunteers") +
+          pdfTable(["Volunteer", "Hours"], v.allVolunteers.slice(0, 15).map((x) => [x.name, formatHours(x.value)])) +
+          (inventoryStats.restock.length
+            ? pdfHeading("Items needing restock") +
+              pdfTable(["Item", "Quantity", "Restock at"], inventoryStats.restock.map((i) => [i.name, `${getQty(i)} ${i.unit ?? ""}`.trim(), getThreshold(i)]))
+            : "");
         break;
       case "donations":
-        body = `
-          ${statBlock([
-            ["Total raised", formatCurrency(donationStats.total)],
-            ["Donations", donationStats.count],
-            ["Unique donors", donationStats.uniqueDonors],
-            ["Average gift", formatCurrency(donationStats.average)],
-          ])}
-          <h2>By campaign</h2>
-          ${tableBlock(["Campaign", "Total"], donationStats.byCampaign.map((c) => [c.name, formatCurrency(c.value)]))}
-          <h2>All donations</h2>
-          ${tableBlock(
+        body =
+          pdfStats([
+            stat("Total raised", formatCurrency(d.total), d.total, d.prev?.total),
+            stat("Gifts", formatCount(d.count), d.count, d.prev?.count),
+            stat("Donors", formatCount(d.donors), d.donors, d.prev?.donors),
+            stat("Average gift", formatCurrency(d.average), d.average, d.prev?.average),
+          ]) +
+          pdfStats([
+            ...(d.newDonors != null ? [{ label: "New donors", value: formatCount(d.newDonors) }, { label: "Returning donors", value: formatCount(d.returningDonors ?? 0) }] : []),
+            { label: "Gave more than once", value: formatCount(d.repeatDonors) },
+          ]) +
+          goalsHtml() +
+          pdfHeading("Top donors") +
+          pdfTable(
+            ["Donor", "Total", "Gifts", "Latest gift"],
+            d.topDonors.map((x) => [x.name + (x.isNew ? " (new)" : ""), formatCurrency(x.total), x.gifts, formatDate(x.last)]),
+          ) +
+          pdfHeading("By campaign") +
+          pdfTable(["Campaign", "Total"], d.byCampaign.map((c) => [c.name, formatCurrency(c.value)])) +
+          pdfHeading("All donations") +
+          pdfTable(
             ["Donor", "Amount", "Date", "Campaign", "Method"],
-            donationsNewestFirst.map((d) => [
-              d.donor_name,
-              formatCurrency(Number(d.amount)),
-              formatDate(d.date),
-              d.campaign ?? "-",
-              d.payment_method ?? "-",
-            ]),
-          )}
-        `;
+            donationsNewestFirst.map((x) => [x.donor_name, formatCurrency(Number(x.amount)), formatDate(x.date), x.campaign ?? "-", x.payment_method ?? "-"]),
+          );
         break;
       case "volunteers":
-        body = `
-          ${statBlock([
-            ["Total hours", formatHours(volunteerStats.totalHours)],
-            ["Volunteers", volunteerStats.volunteers],
-            ["Sessions", volunteerStats.sessions],
-            ["Average session", `${formatHours(volunteerStats.average)} hrs`],
-          ])}
-          <h2>Hours by volunteer</h2>
-          ${tableBlock(["Volunteer", "Hours"], volunteerStats.allVolunteers.map((v) => [v.name, formatHours(v.value)]))}
-          <h2>All volunteer sessions</h2>
-          ${tableBlock(
-            ["Volunteer", "Activity", "Hours", "Date"],
-            periodHours.map((v) => [v.volunteer_name, v.activity ?? "-", formatHours(Number(v.hours)), formatDate(v.date)]),
-          )}
-        `;
+        body =
+          pdfStats([
+            stat("Total hours", formatHours(v.totalHours), v.totalHours, v.prev?.totalHours),
+            stat("Volunteers", formatCount(v.volunteers), v.volunteers, v.prev?.volunteers),
+            stat("Sessions", formatCount(v.sessions), v.sessions, v.prev?.sessions),
+            stat("Average session", `${formatHours(v.average)} hrs`, v.average, v.prev?.average),
+          ]) +
+          pdfHeading("Hours by volunteer") +
+          pdfTable(["Volunteer", "Hours"], v.allVolunteers.map((x) => [x.name, formatHours(x.value)])) +
+          pdfHeading("Hours by activity") +
+          pdfTable(["Activity", "Hours"], v.byActivity.map((x) => [x.name, formatHours(x.value)])) +
+          pdfHeading("All sessions") +
+          pdfTable(["Volunteer", "Activity", "Hours", "Date"], v.newestFirst.map((x) => [x.volunteer_name, x.activity ?? "-", formatHours(Number(x.hours)), formatDate(x.date)]));
         break;
       case "inventory":
-        body = `
-          ${statBlock([
-            ["Total items", inventoryStats.total],
-            ["Low stock", inventoryStats.low],
-            ["Out of stock", inventoryStats.out],
-            ["Categories", inventoryStats.byCategory.length],
-          ])}
-          <h2>Inventory</h2>
-          ${tableBlock(
+        body =
+          pdfStats([
+            { label: "Items", value: formatCount(inventoryStats.total) },
+            { label: "Low stock", value: formatCount(inventoryStats.low) },
+            { label: "Out of stock", value: formatCount(inventoryStats.out) },
+            { label: "Categories", value: formatCount(inventoryStats.byCategory.length) },
+          ]) +
+          (inventoryStats.restock.length
+            ? pdfHeading("Needs restocking") +
+              pdfTable(["Item", "Quantity", "Restock at", "Location"], inventoryStats.restock.map((i) => [i.name, `${getQty(i)} ${i.unit ?? ""}`.trim(), getThreshold(i), i.location ?? "-"]))
+            : "") +
+          pdfHeading("All inventory") +
+          pdfTable(
             ["Item", "Category", "Qty", "Unit", "Condition", "Location"],
-            inventory.map((i) => [
-              i.name,
-              i.category ?? "-",
-              getQty(i),
-              i.unit ?? "-",
-              i.condition ?? "-",
-              i.location ?? "-",
-            ]),
+            inventory.map((i) => [i.name, i.category ?? "-", getQty(i), i.unit ?? "-", i.condition ?? "-", i.location ?? "-"]),
             (idx) => needsRestock(inventory[idx]),
-          )}
-        `;
+          );
         break;
       case "forms":
-        body = `
-          ${statBlock([
-            ["Submissions", filteredSubmissions.length],
-            ["Fields", formFields.length],
-          ])}
-          <h2>All submissions: ${h(selectedForm?.title ?? "")}</h2>
-          ${searchQuery.trim() ? `<p class="note">Filtered by search: "${h(searchQuery.trim())}"</p>` : ""}
-          ${tableBlock(
-            ["#", ...formFields.map((f) => f.label), "Date"],
-            filteredSubmissions.map((s, i) => [
-              i + 1,
-              ...formFields.map((f) => formatAnswer(getAnswer(s, f.id)) || "-"),
-              s.submitted_at ? new Date(s.submitted_at).toLocaleDateString("en-US") : "-",
-            ]),
-          )}
-        `;
+        if (selectedForm) {
+          const fields = answerFields(fieldsOf(selectedForm));
+          const subs = filteredSubmissions;
+          const summaries = fields
+            .map((f) => {
+              if (CHOICE_FIELD_TYPES.has(f.type)) {
+                const counts = summarizeChoices(f, subs);
+                const total = counts.reduce((s, c) => s + c.value, 0);
+                return pdfHeading(f.label) + pdfTable(["Answer", "Responses", "Share"], counts.map((c) => [c.name, c.value, `${total ? Math.round((c.value / total) * 100) : 0}%`]));
+              }
+              if (f.type === "number") {
+                const n = summarizeNumbers(f, subs);
+                const fmt = (x: number) => (Math.round(x * 10) / 10).toLocaleString("en-US");
+                return n
+                  ? pdfHeading(f.label) +
+                      pdfStats([
+                        { label: "Average", value: fmt(n.avg) },
+                        { label: "Total", value: fmt(n.sum) },
+                        { label: "Lowest", value: fmt(n.min) },
+                        { label: "Highest", value: fmt(n.max) },
+                      ])
+                  : "";
+              }
+              if (TEXT_FIELD_TYPES.has(f.type)) {
+                const answers = subs.map((s) => formatAnswer(getAnswer(s, f.id))).filter(Boolean);
+                return answers.length
+                  ? pdfHeading(f.label) + pdfTable(["Latest answers"], answers.slice(0, 15).map((a) => [a])) + (answers.length > 15 ? pdfNote(`${answers.length - 15} more in the CSV export.`) : "")
+                  : "";
+              }
+              return "";
+            })
+            .join("");
+          body =
+            pdfStats([
+              stat("Responses", formatCount(subs.length), searchQuery.trim() ? undefined : formSubmissions.length, previousFormCounts?.get(selectedForm.id)),
+              { label: "Questions", value: formatCount(fields.length) },
+            ]) +
+            (searchQuery.trim() ? pdfNote(`Only responses matching "${searchQuery.trim()}".`) : "") +
+            summaries +
+            pdfHeading("All responses") +
+            pdfTable(
+              ["#", "Date", ...fields.map((f) => f.label)],
+              subs.map((s, i) => [
+                i + 1,
+                s.submitted_at ? new Date(s.submitted_at).toLocaleDateString("en-US") : "-",
+                ...fields.map((f) => {
+                  const value = getAnswer(s, f.id);
+                  if (mediaUrl(f, value)) return f.type === "image" ? "Photo uploaded" : f.type === "audio" ? "Recording uploaded" : "File uploaded";
+                  return formatAnswer(value) || "-";
+                }),
+              ]),
+            );
+        } else {
+          const counts = new Map<string, number>();
+          for (const s of periodSubmissions) counts.set(s.form_id, (counts.get(s.form_id) ?? 0) + 1);
+          body =
+            pdfStats([stat("Responses", formatCount(periodSubmissions.length), periodSubmissions.length, prevSubmissions?.length)]) +
+            pdfHeading("Responses by form") +
+            pdfTable(
+              ["Form", "Responses", ...(previousFormCounts ? ["Change"] : [])],
+              pickerForms
+                .map((f) => ({ f, n: counts.get(f.id) ?? 0 }))
+                .sort((a, b) => b.n - a.n)
+                .map(({ f, n }) => [
+                  f.title + (f.is_archived ? " (archived)" : ""),
+                  n,
+                  ...(previousFormCounts ? [(() => { const c = percentChange(n, previousFormCounts.get(f.id) ?? 0); return c == null ? "new" : formatChange(c); })()] : []),
+                ]),
+            );
+        }
         break;
     }
 
-    const periodLine = reportType === "inventory" ? "Current stock" : `Period: ${periodLabel}`;
-
-    w.document.write(`<!DOCTYPE html><html><head>
-      <meta charset="utf-8">
-      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com">
-      <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Quicksand:wght@300..700&display=swap">
-      <title>${h(`HumMotion ${reportLabel} - ${generated}`)}</title>
-      <style>
-        * { box-sizing: border-box; }
-        body { font-family: Quicksand, sans-serif; max-width: 960px; margin: 0 auto; padding: 48px 40px; color: #111; }
-        .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #111; padding-bottom: 20px; margin-bottom: 32px; }
-        .header h1 { font-size: 30px; margin: 0 0 4px; }
-        .header p { margin: 0; color: #555; font-size: 13px; font-style: italic; }
-        .logo { font-size: 13px; color: #888; text-align: right; }
-        h2 { font-size: 18px; border-bottom: 1px solid #ddd; padding-bottom: 6px; margin-top: 36px; }
-        .note { font-size: 12px; color: #666; font-style: italic; }
-        table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
-        thead { display: table-header-group; } /* repeat headers on each printed page */
-        tr { page-break-inside: avoid; }
-        th { background: #f4f4f4; text-align: left; padding: 8px 12px; border: 1px solid #ddd; font-weight: 600; }
-        td { padding: 7px 12px; border: 1px solid #ddd; vertical-align: top; word-break: break-word; }
-        tr:nth-child(even) td { background: #fafafa; }
-        tr.highlight td { background: #fff0f0; }
-        .stats-row { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 16px; }
-        .stat { background: #f4f6fa; border-radius: 8px; padding: 16px 24px; text-align: center; flex: 1; min-width: 120px; }
-        .stat strong { display: block; font-size: 26px; color: #1a3f8f; margin-bottom: 4px; }
-        .stat span { font-size: 12px; color: #666; }
-        .footer { margin-top: 48px; border-top: 1px solid #ddd; padding-top: 16px; font-size: 11px; color: #aaa; text-align: center; }
-        @media print { body { padding: 24px; } * { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
-      </style>
-    </head><body>
-      <div class="header">
-        <div>
-          <h1>${h(reportLabel)}</h1>
-          <p>${h(periodLine)}</p>
-          <p>Generated ${h(generated)}</p>
-        </div>
-        <div class="logo">HumMotion<br/>Impact Reporting</div>
-      </div>
-      ${body}
-      <div class="footer">Generated by HumMotion, ${h(generated)}. Confidential.</div>
-    </body></html>`);
-    w.document.close();
-
-    // Print once the new page has finished loading (fonts and layout ready).
-    const triggerPrint = () => {
-      w.focus();
-      w.print();
-    };
-    if (w.document.readyState === "complete") setTimeout(triggerPrint, 250);
-    else w.addEventListener("load", triggerPrint, { once: true });
-    setIsExporting(false);
+    const title = reportType === "forms" && selectedForm ? `${selectedForm.title}: Responses` : tabInfo.title;
+    const periodLine =
+      reportType === "inventory"
+        ? "Current stock levels"
+        : `${periodLabel}${previous ? ` · compared with ${describePeriod(previous.from, previous.to)}` : ""}`;
+    const opened = openPrintableReport({
+      title,
+      periodLine,
+      orgName,
+      logoUrl: branding.logoUrl,
+      brandColor: branding.primaryColor,
+      highlights: highlights(),
+      body,
+      chartsRoot: panelRef.current,
+    });
+    if (!opened) {
+      toast({ title: "Pop-up blocked", description: "Allow pop-ups for this site to export a PDF, then try again.", variant: "destructive" });
+    }
   };
 
   // -------------------------------------------------------------------------
-  // Render: loading
+  // Tabs keyboard support: arrow keys move between tabs.
+  // -------------------------------------------------------------------------
+
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const onTabKey = (e: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const delta = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    const target = e.key === "Home" ? 0 : e.key === "End" ? REPORT_TYPES.length - 1 : delta ? (index + delta + REPORT_TYPES.length) % REPORT_TYPES.length : null;
+    if (target === null) return;
+    e.preventDefault();
+    setReportType(REPORT_TYPES[target].value);
+    tabRefs.current[target]?.focus();
+  };
+
+  // -------------------------------------------------------------------------
+  // Render
   // -------------------------------------------------------------------------
 
   if (isLoading) {
     return (
       <div className="p-6 space-y-6 max-w-7xl mx-auto" aria-busy="true">
         <Skeleton className="h-8 w-48" />
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[1, 2, 3, 4].map((i) => (
-            <Skeleton key={i} className="h-24" />
+            <Skeleton key={i} className="h-28" />
           ))}
         </div>
         <Skeleton className="h-64 w-full" />
@@ -1282,47 +928,56 @@ export default function ReportsPage() {
     );
   }
 
-  // -------------------------------------------------------------------------
-  // Render: page
-  // -------------------------------------------------------------------------
+  const d = donationStats;
+  const v = volunteerStats;
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      {/* ===== Header and export buttons ===== */}
+      {/* ===== Header and exports ===== */}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="space-y-1">
           <h1 className="text-2xl font-serif font-bold">Reports</h1>
-          <p className="text-muted-foreground">Visual reports for your board, donors, and grant applications</p>
+          <p className="text-muted-foreground">Track your impact, and share it with your board, donors and funders</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={exportCSV} disabled={!canExport}>
             <Download className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> CSV
           </Button>
-          <Button size="sm" onClick={exportPDF} disabled={!canExport || isExporting}>
-            <FileDown className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
-            {isExporting ? "Preparing..." : "Export PDF"}
+          <Button size="sm" onClick={exportPDF} disabled={!canExport}>
+            <FileDown className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> Export PDF
           </Button>
         </div>
       </div>
 
-      {/* ===== Report type tabs =====
-          role="tablist"/"tab" lets screen readers announce these as tabs and
-          which one is selected. The icons were defined but never shown before. */}
+      {hasSampleData && (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Info className="h-4 w-4 shrink-0" aria-hidden="true" />
+          Sample data isn't included in reports.{" "}
+          <Link href="/" className="text-primary underline underline-offset-4 hover:no-underline">
+            Clear it from the dashboard
+          </Link>
+        </p>
+      )}
+
+      {/* ===== Tabs ===== */}
       <div className="flex flex-wrap gap-2" role="tablist" aria-label="Report type">
-        {REPORT_TYPES.map((rt) => {
+        {REPORT_TYPES.map((rt, i) => {
           const Icon = rt.icon;
           const isActive = reportType === rt.value;
           return (
             <button
               key={rt.value}
+              ref={(el) => (tabRefs.current[i] = el)}
               type="button"
               role="tab"
+              id={`report-tab-${rt.value}`}
               aria-selected={isActive}
+              aria-controls="report-panel"
+              tabIndex={isActive ? 0 : -1}
               onClick={() => setReportType(rt.value)}
+              onKeyDown={(e) => onTabKey(e, i)}
               className={`flex items-center gap-1.5 px-4 py-2 rounded-full text-sm font-medium border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                isActive
-                  ? "bg-primary text-primary-foreground border-primary"
-                  : "border-border hover:border-primary/60 hover:bg-muted"
+                isActive ? "bg-primary text-primary-foreground border-primary" : "border-border hover:border-primary/60 hover:bg-muted"
               }`}
             >
               <Icon className="h-3.5 w-3.5" aria-hidden="true" />
@@ -1332,22 +987,20 @@ export default function ReportsPage() {
         })}
       </div>
 
-      {/* ===== Report period (hidden on Inventory, which is always current) ===== */}
+      {/* ===== Report period ===== */}
       {reportType !== "inventory" ? (
         <div className="p-4 rounded-lg border bg-muted/30 space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <CalendarRange className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
             <span className="text-sm font-medium">Report period</span>
             <span className="text-sm text-muted-foreground">{periodLabel}</span>
-            {periodPreset !== "all" && (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => applyPreset("all")}
-                className="ml-auto h-7 text-xs text-muted-foreground"
-              >
-                <X className="mr-1 h-3 w-3" aria-hidden="true" /> Show all time
-              </Button>
+            {previous && (
+              <span className="text-xs text-muted-foreground">· compared with {describePeriod(previous.from, previous.to)}</span>
+            )}
+            {isRefreshing && (
+              <span className="text-xs text-muted-foreground" role="status">
+                · Updating...
+              </span>
             )}
           </div>
           <div className="grid sm:grid-cols-3 gap-3">
@@ -1355,7 +1008,7 @@ export default function ReportsPage() {
               <Label htmlFor="period-preset" className="text-xs text-muted-foreground">
                 Quick select
               </Label>
-              <Select value={periodPreset} onValueChange={(v) => applyPreset(v as PeriodPreset)}>
+              <Select value={periodPreset} onValueChange={(val) => applyPreset(val as PeriodPreset)}>
                 <SelectTrigger id="period-preset" className="h-9 text-sm">
                   <SelectValue />
                 </SelectTrigger>
@@ -1373,546 +1026,388 @@ export default function ReportsPage() {
               <Label htmlFor="period-from" className="text-xs text-muted-foreground">
                 From
               </Label>
-              <Input
-                id="period-from"
-                type="date"
-                value={dateFrom}
-                max={dateTo || undefined}
-                onChange={(e) => changeDate("from", e.target.value)}
-                className="h-9 text-sm"
-              />
+              <Input id="period-from" type="date" value={dateFrom} max={dateTo || undefined} onChange={(e) => changeDate("from", e.target.value)} className="h-9 text-sm" />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="period-to" className="text-xs text-muted-foreground">
                 To
               </Label>
-              <Input
-                id="period-to"
-                type="date"
-                value={dateTo}
-                min={dateFrom || undefined}
-                onChange={(e) => changeDate("to", e.target.value)}
-                className="h-9 text-sm"
-              />
+              <Input id="period-to" type="date" value={dateTo} min={dateFrom || undefined} onChange={(e) => changeDate("to", e.target.value)} className="h-9 text-sm" />
             </div>
           </div>
           {periodError && (
             <p role="alert" className="text-xs text-destructive">
-              {periodError}
+              {periodError} The report shows the last valid period until it's fixed.
             </p>
           )}
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground">Inventory reports always show current stock levels.</p>
+        <p className="text-sm text-muted-foreground">Inventory always shows current stock levels.</p>
       )}
 
-      {/* =================================================================
-          IMPACT OVERVIEW
-          ================================================================= */}
-      {reportType === "impact" && (
-        <div className="space-y-6">
-          <StatGrid
-            stats={[
-              { label: "Total raised", value: formatCurrency(donationStats.total), icon: DollarSign },
-              { label: "Volunteer hours", value: formatHours(volunteerStats.totalHours), icon: Clock },
-              { label: "Form responses", value: periodSubmissions.length.toLocaleString("en-US"), icon: FileText },
-              { label: "Inventory items", value: inventoryStats.total.toLocaleString("en-US"), icon: Package },
-            ]}
-          />
+      <div id="report-panel" role="tabpanel" aria-labelledby={`report-tab-${reportType}`} ref={panelRef} className="space-y-6">
+        {/* =============================== IMPACT =============================== */}
+        {reportType === "impact" && (
+          <>
+            <StatGrid
+              compareLabel={compareLabel}
+              stats={[
+                { label: "Total raised", value: formatCurrency(d.total), icon: DollarSign, change: percentChange(d.total, d.prev?.total) },
+                { label: "Volunteer hours", value: formatHours(v.totalHours), icon: Clock, change: percentChange(v.totalHours, v.prev?.totalHours) },
+                { label: "Form responses", value: formatCount(periodSubmissions.length), icon: FileText, change: percentChange(periodSubmissions.length, prevSubmissions?.length) },
+                { label: "Donors", value: formatCount(d.donors), icon: Users, change: percentChange(d.donors, d.prev?.donors) },
+              ]}
+            />
+            <div className="grid md:grid-cols-2 gap-6">
+              <ChartCard title="Donations over time" description={`Per ${granularityLabel(granularity)}`}>
+                <TimeSeriesChart data={d.series} kind="area" seriesName="Donations" valueFormatter={formatCurrency} yTickFormatter={(x) => `$${x.toLocaleString("en-US")}`} />
+              </ChartCard>
+              <ChartCard title="Volunteer hours over time" description={`Per ${granularityLabel(granularity)}`}>
+                <TimeSeriesChart data={v.series} kind="bar" color={COLORS[1]} seriesName="Hours" valueFormatter={(x) => `${formatHours(x)} hrs`} />
+              </ChartCard>
+            </div>
+            <GoalsCard goals={goals} campaigns={campaignNames} onChanged={goals.reload} limit={3} />
+            {inventoryStats.restock.length > 0 && (
+              <Card className="p-5 border-destructive/40 bg-destructive/5">
+                <div className="flex items-center gap-2 mb-3">
+                  <AlertTriangle className="h-4 w-4 text-destructive" aria-hidden="true" />
+                  <h3 className="font-semibold text-destructive">Items needing restock</h3>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {inventoryStats.restock.map((i) => (
+                    <Badge key={i.id} variant="destructive">
+                      {i.name}: {isOutOfStock(i) ? "out of stock" : `${getQty(i)} left`}
+                    </Badge>
+                  ))}
+                </div>
+              </Card>
+            )}
+          </>
+        )}
 
-          <div className="grid sm:grid-cols-2 gap-6">
-            <ChartCard title="Donations by month">
-              <TimeSeriesChart
-                data={donationStats.byMonth}
-                kind="area"
-                seriesName="Donations"
-                valueFormatter={formatCurrency}
-                yTickFormatter={(v) => `$${v.toLocaleString("en-US")}`}
-              />
-            </ChartCard>
-            <ChartCard title="Volunteer hours by month">
-              <TimeSeriesChart
-                data={volunteerStats.byMonth}
-                kind="bar"
-                color={COLORS[2]}
-                seriesName="Hours"
-                valueFormatter={(v) => `${formatHours(v)} hrs`}
-              />
-            </ChartCard>
-          </div>
+        {/* ============================== DONATIONS ============================= */}
+        {reportType === "donations" && (
+          <>
+            <StatGrid
+              compareLabel={compareLabel}
+              stats={[
+                { label: "Total raised", value: formatCurrency(d.total), change: percentChange(d.total, d.prev?.total) },
+                { label: "Gifts", value: formatCount(d.count), change: percentChange(d.count, d.prev?.count) },
+                { label: "Donors", value: formatCount(d.donors), change: percentChange(d.donors, d.prev?.donors) },
+                { label: "Average gift", value: formatCurrency(d.average), change: percentChange(d.average, d.prev?.average) },
+              ]}
+            />
+            <StatGrid
+              stats={[
+                d.newDonors != null
+                  ? { label: "New donors", value: formatCount(d.newDonors), sub: "First gift in this period" }
+                  : { label: "One-time donors", value: formatCount(d.donors - d.repeatDonors), sub: "Gave once" },
+                d.returningDonors != null
+                  ? { label: "Returning donors", value: formatCount(d.returningDonors), sub: "Gave before this period too" }
+                  : { label: "Donors", value: formatCount(d.donors) },
+                { label: "Gave more than once", value: formatCount(d.repeatDonors), sub: "In this period" },
+                { label: "Largest gift", value: periodDonations.length ? formatCurrency(Math.max(...periodDonations.map((x) => Number(x.amount)))) : "-" },
+              ]}
+            />
 
-          {/* Restock alerts (current stock, independent of the period). */}
-          {inventoryStats.restock.length > 0 && (
-            <Card className="p-5 border-destructive/40 bg-destructive/5">
-              <div className="flex items-center gap-2 mb-3">
-                <AlertTriangle className="h-4 w-4 text-destructive" aria-hidden="true" />
-                <h3 className="font-semibold text-destructive">Items needing restock</h3>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {inventoryStats.restock.map((i) => (
-                  <Badge key={i.id} variant="destructive">
-                    {i.name}: {isOutOfStock(i) ? "out of stock" : `${getQty(i)} left`}
-                  </Badge>
-                ))}
-              </div>
-            </Card>
-          )}
-        </div>
-      )}
-
-      {/* =================================================================
-          DONATION REPORT
-          ================================================================= */}
-      {reportType === "donations" && (
-        <div className="space-y-6">
-          <StatGrid
-            stats={[
-              { label: "Total raised", value: formatCurrency(donationStats.total) },
-              { label: "Donations", value: donationStats.count.toLocaleString("en-US") },
-              { label: "Unique donors", value: donationStats.uniqueDonors.toLocaleString("en-US") },
-              { label: "Average gift", value: formatCurrency(donationStats.average) },
-            ]}
-          />
-
-          <div className="grid sm:grid-cols-3 gap-6">
-            <ChartCard title="Donations over time" className="sm:col-span-2">
-              <TimeSeriesChart
-                data={donationStats.byMonth}
-                kind="area"
-                seriesName="Total"
-                valueFormatter={formatCurrency}
-                yTickFormatter={(v) => `$${v.toLocaleString("en-US")}`}
-                heightClass="h-56"
-              />
-            </ChartCard>
-
-            <div className="space-y-6">
+            <div className="grid lg:grid-cols-3 gap-6">
+              <ChartCard title="Donations over time" description={`Per ${granularityLabel(granularity)}`} className="lg:col-span-2">
+                <TimeSeriesChart data={d.series} kind="area" seriesName="Total" valueFormatter={formatCurrency} yTickFormatter={(x) => `$${x.toLocaleString("en-US")}`} heightClass="h-64" />
+              </ChartCard>
               <ChartCard title="By campaign">
-                <DonutChart data={donationStats.byCampaign} valueFormatter={formatCurrency} legendLimit={4} heightClass="h-36" />
+                <DonutChart data={d.byCampaign} valueFormatter={formatCurrency} heightClass="h-36" />
               </ChartCard>
+            </div>
+
+            <GoalsCard goals={goals} campaigns={campaignNames} onChanged={goals.reload} />
+
+            <div className="grid lg:grid-cols-3 gap-6">
+              <Card className="lg:col-span-2 overflow-auto">
+                <div className="p-4 border-b">
+                  <h3 className="font-semibold">Top donors</h3>
+                  <p className="text-xs text-muted-foreground">By total given in this period</p>
+                </div>
+                {d.topDonors.length ? (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Donor</TableHead>
+                        <TableHead className="text-right">Total</TableHead>
+                        <TableHead className="text-right">Gifts</TableHead>
+                        <TableHead>Latest gift</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {d.topDonors.map((x) => (
+                        <TableRow key={x.key}>
+                          <TableCell className="font-medium">
+                            {x.name}
+                            {x.isNew && (
+                              <Badge variant="secondary" className="ml-2 text-[10px]">
+                                New
+                              </Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right font-semibold whitespace-nowrap">{formatCurrency(x.total)}</TableCell>
+                          <TableCell className="text-right">{x.gifts}</TableCell>
+                          <TableCell className="whitespace-nowrap">{formatDate(x.last)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <EmptyChart />
+                )}
+              </Card>
               <ChartCard title="By payment method">
-                <DonutChart
-                  data={donationStats.byMethodCount}
-                  valueFormatter={(v) => `${v} ${v === 1 ? "gift" : "gifts"}`}
-                  legendLimit={5}
-                  heightClass="h-32"
-                />
+                <DonutChart data={d.byMethod} valueFormatter={(x) => `${x} ${x === 1 ? "gift" : "gifts"}`} heightClass="h-32" />
               </ChartCard>
             </div>
-          </div>
 
-          {/* Donation table (capped on screen; exports include everything). */}
-          {periodDonations.length > 0 ? (
-            <Card className="overflow-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Donor</TableHead>
-                    <TableHead className="text-right">Amount</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Campaign</TableHead>
-                    <TableHead>Method</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {donationsNewestFirst.slice(0, MAX_TABLE_ROWS).map((d) => (
-                    <TableRow key={d.id}>
-                      <TableCell className="font-medium">{d.donor_name}</TableCell>
-                      <TableCell className="text-right text-primary font-semibold whitespace-nowrap">
-                        {formatCurrency(Number(d.amount))}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap">{formatDate(d.date)}</TableCell>
-                      <TableCell>{d.campaign ? <Badge variant="secondary">{d.campaign}</Badge> : "-"}</TableCell>
-                      <TableCell>{d.payment_method ?? "-"}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-              {periodDonations.length > MAX_TABLE_ROWS && (
-                <p className="p-3 text-xs text-muted-foreground text-center border-t">
-                  Showing the latest {MAX_TABLE_ROWS} of {periodDonations.length.toLocaleString("en-US")} donations. Export
-                  CSV or PDF for the full list.
-                </p>
-              )}
-            </Card>
-          ) : (
-            <EmptyChart
-              message={donations.length ? "No donations in this period" : "No donations recorded yet"}
-            />
-          )}
-        </div>
-      )}
-
-      {/* =================================================================
-          VOLUNTEER REPORT
-          ================================================================= */}
-      {reportType === "volunteers" && (
-        <div className="space-y-6">
-          <StatGrid
-            stats={[
-              { label: "Total hours", value: formatHours(volunteerStats.totalHours) },
-              { label: "Volunteers", value: volunteerStats.volunteers.toLocaleString("en-US") },
-              { label: "Sessions", value: volunteerStats.sessions.toLocaleString("en-US") },
-              {
-                label: "Average session",
-                value: volunteerStats.sessions ? `${formatHours(volunteerStats.average)} hrs` : "-",
-              },
-            ]}
-          />
-
-          <div className="grid sm:grid-cols-2 gap-6">
-            <ChartCard title="Top volunteers">
-              {volunteerStats.top.length > 0 ? (
-                <div className="h-56">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={volunteerStats.top} layout="vertical">
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                      <XAxis type="number" tick={AXIS_TICK} />
-                      <YAxis type="category" dataKey="label" width={100} tick={AXIS_TICK} />
-                      <Tooltip
-                        contentStyle={TOOLTIP_STYLE}
-                        labelFormatter={(_, payload) => payload?.[0]?.payload?.fullName ?? ""}
-                        formatter={(v) => [`${formatHours(Number(v))} hrs`, "Hours"]}
-                      />
-                      <Bar dataKey="hours" fill={COLORS[2]} radius={[0, 4, 4, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <EmptyChart />
-              )}
-            </ChartCard>
-
-            <ChartCard title="Hours by activity">
-              <DonutChart data={volunteerStats.byActivity} valueFormatter={(v) => `${formatHours(v)} hrs`} />
-            </ChartCard>
-          </div>
-
-          <ChartCard title="Hours over time">
-            <TimeSeriesChart
-              data={volunteerStats.byMonth}
-              kind="bar"
-              color={COLORS[2]}
-              seriesName="Hours"
-              valueFormatter={(v) => `${formatHours(v)} hrs`}
-              heightClass="h-48"
-            />
-          </ChartCard>
-        </div>
-      )}
-
-      {/* =================================================================
-          INVENTORY REPORT
-          ================================================================= */}
-      {reportType === "inventory" && (
-        <div className="space-y-6">
-          <StatGrid
-            stats={[
-              { label: "Total items", value: inventoryStats.total },
-              { label: "Low stock", value: inventoryStats.low, danger: inventoryStats.low > 0 },
-              { label: "Out of stock", value: inventoryStats.out, danger: inventoryStats.out > 0 },
-              { label: "Categories", value: inventoryStats.byCategory.length },
-            ]}
-          />
-
-          <div className="grid sm:grid-cols-2 gap-6">
-            <ChartCard title="Stock levels">
-              {inventoryStats.chart.length > 0 ? (
-                // Scrolls sideways for many items so labels stay readable.
-                <div className="overflow-x-auto">
-                  <div className="h-56" style={{ minWidth: Math.max(inventoryStats.chart.length * 40, 300) }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={inventoryStats.chart} margin={{ bottom: 40 }}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                        <XAxis
-                          dataKey="label"
-                          tick={{ ...AXIS_TICK, fontSize: 10 }}
-                          angle={-30}
-                          textAnchor="end"
-                          interval={0}
-                        />
-                        <YAxis tick={AXIS_TICK} allowDecimals={false} />
-                        <Tooltip
-                          contentStyle={TOOLTIP_STYLE}
-                          labelFormatter={(_, payload) => payload?.[0]?.payload?.fullName ?? ""}
-                          formatter={(v, _n, entry) => [`${v} ${entry?.payload?.unit ?? "units"}`, "Quantity"]}
-                        />
-                        <Bar dataKey="quantity" radius={[4, 4, 0, 0]}>
-                          {inventoryStats.chart.map((item) => (
-                            <Cell key={item.id} fill={item.restock ? "hsl(var(--destructive))" : COLORS[0]} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              ) : (
-                <EmptyChart message="No inventory items yet" />
-              )}
-            </ChartCard>
-
-            <ChartCard title="Items by category">
-              <DonutChart
-                data={inventoryStats.byCategory}
-                valueFormatter={(v) => `${v} ${v === 1 ? "item" : "items"}`}
-                legendLimit={8}
-              />
-            </ChartCard>
-          </div>
-
-          {inventoryStats.restock.length > 0 && (
-            <Card className="p-5 border-destructive/40 bg-destructive/5">
-              <div className="flex items-center gap-2 mb-3">
-                <AlertTriangle className="h-4 w-4 text-destructive" aria-hidden="true" />
-                <h3 className="font-semibold text-destructive">Needs restocking</h3>
-              </div>
-              <div className="overflow-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Item</TableHead>
-                      <TableHead>Qty</TableHead>
-                      <TableHead>Threshold</TableHead>
-                      <TableHead>Category</TableHead>
-                      <TableHead>Location</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {inventoryStats.restock.map((i) => (
-                      <TableRow key={i.id}>
-                        <TableCell className="font-medium">{i.name}</TableCell>
-                        <TableCell>
-                          <Badge variant="destructive">
-                            {getQty(i)} {i.unit ?? ""}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">{getThreshold(i)}</TableCell>
-                        <TableCell>{i.category ?? "-"}</TableCell>
-                        <TableCell>{i.location ?? "-"}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </Card>
-          )}
-        </div>
-      )}
-
-      {/* =================================================================
-          FORM SUBMISSIONS REPORT
-          ================================================================= */}
-      {reportType === "forms" && (
-        <div className="space-y-6">
-          {/* Form picker, response count and search */}
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="report-form" className="text-xs text-muted-foreground">
-                Form
-              </Label>
-              <Select value={selectedFormId || ALL_FORMS} onValueChange={selectForm}>
-                <SelectTrigger id="report-form" className="w-72">
-                  <SelectValue placeholder="Select a form..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_FORMS}>All forms (overview)</SelectItem>
-                  {forms.map((f) => (
-                    <SelectItem key={f.id} value={f.id}>
-                      {f.title}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {selectedForm && formSubmissions.length > 0 && (
-              <div className="space-y-1.5 flex-1 min-w-[200px] max-w-sm">
-                <Label htmlFor="report-search" className="text-xs text-muted-foreground">
-                  Search responses
-                </Label>
-                <div className="relative">
-                  <Search
-                    className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground"
-                    aria-hidden="true"
-                  />
-                  <Input
-                    id="report-search"
-                    placeholder="Search all answers..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-8 pr-8 h-9 text-sm"
-                  />
-                  {searchQuery && (
-                    <button
-                      type="button"
-                      onClick={() => setSearchQuery("")}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                      aria-label="Clear search"
-                    >
-                      <X className="h-3.5 w-3.5" aria-hidden="true" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {selectedForm && (
-              <Badge variant="secondary" className="mb-2">
-                {filteredSubmissions.length.toLocaleString("en-US")}
-                {filteredSubmissions.length !== formSubmissions.length
-                  ? ` of ${formSubmissions.length.toLocaleString("en-US")}`
-                  : ""}{" "}
-                {formSubmissions.length === 1 ? "submission" : "submissions"}
-              </Badge>
-            )}
-          </div>
-
-          {/* Content: overview, empty states, or the selected form's report */}
-          {!selectedForm ? (
-            <ChartCard title="Submissions by form">
-              {forms.length > 0 ? (
-                <div className="h-56">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={submissionsPerForm}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                      <XAxis dataKey="label" tick={AXIS_TICK} interval={0} />
-                      <YAxis tick={AXIS_TICK} allowDecimals={false} />
-                      <Tooltip
-                        contentStyle={TOOLTIP_STYLE}
-                        labelFormatter={(_, payload) => payload?.[0]?.payload?.fullName ?? ""}
-                        formatter={(v) => [v, "Submissions"]}
-                      />
-                      <Bar dataKey="submissions" fill={COLORS[0]} radius={[4, 4, 0, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              ) : (
-                <EmptyChart message="No forms yet" />
-              )}
-            </ChartCard>
-          ) : formSubmissions.length === 0 ? (
-            <EmptyChart
-              message={
-                allSubmissions.some((s) => s.form_id === selectedFormId)
-                  ? "No submissions for this form in this period"
-                  : "No submissions for this form yet"
-              }
-            />
-          ) : filteredSubmissions.length === 0 ? (
-            <div className="text-center py-16 space-y-3">
-              <Search className="h-6 w-6 text-muted-foreground mx-auto" aria-hidden="true" />
-              <p className="text-sm font-medium">No responses match "{searchQuery}"</p>
-              <Button variant="outline" size="sm" onClick={() => setSearchQuery("")}>
-                Clear search
-              </Button>
-            </div>
-          ) : (
-            <>
-              <StatGrid
-                stats={[
-                  { label: "In this report", value: filteredSubmissions.length.toLocaleString("en-US") },
-                  { label: "Last 7 days", value: recentCounts.last7.toLocaleString("en-US") },
-                  { label: "Last 30 days", value: recentCounts.last30.toLocaleString("en-US") },
-                  {
-                    label: "Latest response",
-                    value: recentCounts.latest ? formatDate(toISODate(new Date(recentCounts.latest))) : "-",
-                  },
-                ]}
-              />
-
-              {submissionsSeries.length > 1 && (
-                <ChartCard title="Submissions over time">
-                  <TimeSeriesChart data={submissionsSeries} kind="line" seriesName="Submissions" heightClass="h-48" />
-                </ChartCard>
-              )}
-
-              {/* One donut per choice field (dropdown, radio, checkbox). */}
-              {choiceFields.length > 0 && (
-                <div className="grid sm:grid-cols-2 gap-6">
-                  {choiceFields.map((field) => (
-                    <ChartCard key={field.id} title={field.label || "Untitled field"}>
-                      <DonutChart
-                        data={summarizeChoices(field, filteredSubmissions)}
-                        valueFormatter={(v) => `${v} ${v === 1 ? "response" : "responses"}`}
-                        heightClass="h-44"
-                        showLabels
-                      />
-                    </ChartCard>
-                  ))}
-                </div>
-              )}
-
-              {/* Statistics for number fields. */}
-              {numberFields.map((field) => {
-                const summary = summarizeNumbers(field, filteredSubmissions);
-                if (!summary) return null;
-                const fmt = (n: number) => (Math.round(n * 10) / 10).toLocaleString("en-US");
-                return (
-                  <ChartCard key={field.id} title={`${field.label || "Untitled field"}: statistics`}>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                      {(
-                        [
-                          ["Average", fmt(summary.avg)],
-                          ["Minimum", fmt(summary.min)],
-                          ["Maximum", fmt(summary.max)],
-                          ["Total", fmt(summary.sum)],
-                        ] as const
-                      ).map(([label, value]) => (
-                        <div key={label} className="text-center p-4 bg-muted/40 rounded-md">
-                          <p className="text-xl font-bold">{value}</p>
-                          <p className="text-xs text-muted-foreground">{label}</p>
-                        </div>
-                      ))}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-2">
-                      Based on {summary.count} {summary.count === 1 ? "answer" : "answers"}.
-                    </p>
-                  </ChartCard>
-                );
-              })}
-
-              {/* Submissions table (capped on screen; exports include everything). */}
+            {periodDonations.length > 0 ? (
               <Card className="overflow-auto">
+                <div className="p-4 border-b">
+                  <h3 className="font-semibold">All donations</h3>
+                </div>
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-10">#</TableHead>
-                      {formFields.map((f) => (
-                        <TableHead key={f.id}>{f.label}</TableHead>
-                      ))}
-                      <TableHead>Submitted</TableHead>
+                      <TableHead>Donor</TableHead>
+                      <TableHead className="text-right">Amount</TableHead>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Campaign</TableHead>
+                      <TableHead>Method</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredSubmissions.slice(0, MAX_TABLE_ROWS).map((sub, idx) => (
-                      <TableRow key={sub.id}>
-                        <TableCell className="text-muted-foreground text-xs">{idx + 1}</TableCell>
-                        {formFields.map((f) => {
-                          const text = formatAnswer(getAnswer(sub, f.id));
-                          return (
-                            // title shows the full answer on hover since the cell is truncated.
-                            <TableCell key={f.id} className="max-w-[160px] truncate" title={text || undefined}>
-                              {text || "-"}
-                            </TableCell>
-                          );
-                        })}
-                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                          {sub.submitted_at ? new Date(sub.submitted_at).toLocaleDateString("en-US") : "-"}
-                        </TableCell>
+                    {donationsNewestFirst.slice(0, MAX_TABLE_ROWS).map((x) => (
+                      <TableRow key={x.id}>
+                        <TableCell className="font-medium">{x.donor_name}</TableCell>
+                        <TableCell className="text-right text-primary font-semibold whitespace-nowrap">{formatCurrency(Number(x.amount))}</TableCell>
+                        <TableCell className="whitespace-nowrap">{formatDate(x.date)}</TableCell>
+                        <TableCell>{x.campaign ? <Badge variant="secondary">{x.campaign}</Badge> : "-"}</TableCell>
+                        <TableCell>{x.payment_method ?? "-"}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
-                {filteredSubmissions.length > MAX_TABLE_ROWS && (
+                {periodDonations.length > MAX_TABLE_ROWS && (
                   <p className="p-3 text-xs text-muted-foreground text-center border-t">
-                    Showing the latest {MAX_TABLE_ROWS} of {filteredSubmissions.length.toLocaleString("en-US")}{" "}
-                    submissions. Export CSV or PDF for the full list.
+                    Showing the latest {MAX_TABLE_ROWS} of {formatCount(periodDonations.length)} donations. Export CSV or PDF for the full list.
                   </p>
                 )}
               </Card>
-            </>
-          )}
-        </div>
+            ) : (
+              <EmptyChart message="No donations in this period" />
+            )}
+          </>
+        )}
+
+        {/* ============================= VOLUNTEERS ============================= */}
+        {reportType === "volunteers" && (
+          <>
+            <StatGrid
+              compareLabel={compareLabel}
+              stats={[
+                { label: "Total hours", value: formatHours(v.totalHours), change: percentChange(v.totalHours, v.prev?.totalHours) },
+                { label: "Volunteers", value: formatCount(v.volunteers), change: percentChange(v.volunteers, v.prev?.volunteers) },
+                { label: "Sessions", value: formatCount(v.sessions), change: percentChange(v.sessions, v.prev?.sessions) },
+                { label: "Average session", value: v.sessions ? `${formatHours(v.average)} hrs` : "-", change: v.sessions ? percentChange(v.average, v.prev?.average) : null },
+              ]}
+            />
+            <div className="grid md:grid-cols-2 gap-6">
+              <ChartCard title="Top volunteers" description="By hours in this period">
+                <RankedBarChart data={v.top} seriesName="Hours" color={COLORS[1]} valueFormatter={(x) => `${formatHours(x)} hrs`} />
+              </ChartCard>
+              <ChartCard title="Hours by activity">
+                <DonutChart data={v.byActivity} valueFormatter={(x) => `${formatHours(x)} hrs`} />
+              </ChartCard>
+            </div>
+            <ChartCard title="Hours over time" description={`Per ${granularityLabel(granularity)}`}>
+              <TimeSeriesChart data={v.series} kind="bar" color={COLORS[1]} seriesName="Hours" valueFormatter={(x) => `${formatHours(x)} hrs`} heightClass="h-56" />
+            </ChartCard>
+            {periodHours.length > 0 && (
+              <Card className="overflow-auto">
+                <div className="p-4 border-b">
+                  <h3 className="font-semibold">All sessions</h3>
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Volunteer</TableHead>
+                      <TableHead>Activity</TableHead>
+                      <TableHead className="text-right">Hours</TableHead>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Notes</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {v.newestFirst.slice(0, MAX_TABLE_ROWS).map((x) => (
+                      <TableRow key={x.id}>
+                        <TableCell className="font-medium">{x.volunteer_name}</TableCell>
+                        <TableCell>{x.activity ?? "-"}</TableCell>
+                        <TableCell className="text-right">{formatHours(Number(x.hours))}</TableCell>
+                        <TableCell className="whitespace-nowrap">{formatDate(x.date)}</TableCell>
+                        <TableCell className="max-w-[240px] truncate text-muted-foreground" title={x.notes ?? undefined}>
+                          {x.notes || "-"}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                {periodHours.length > MAX_TABLE_ROWS && (
+                  <p className="p-3 text-xs text-muted-foreground text-center border-t">
+                    Showing the latest {MAX_TABLE_ROWS} of {formatCount(periodHours.length)} sessions. Export CSV or PDF for the full list.
+                  </p>
+                )}
+              </Card>
+            )}
+          </>
+        )}
+
+        {/* ============================== INVENTORY ============================= */}
+        {reportType === "inventory" && (
+          <>
+            <StatGrid
+              stats={[
+                { label: "Items", value: formatCount(inventoryStats.total), sub: `${formatCount(inventoryStats.units)} units in stock` },
+                { label: "Low stock", value: formatCount(inventoryStats.low), danger: inventoryStats.low > 0 },
+                { label: "Out of stock", value: formatCount(inventoryStats.out), danger: inventoryStats.out > 0 },
+                { label: "Categories", value: formatCount(inventoryStats.byCategory.length) },
+              ]}
+            />
+            <div className="grid md:grid-cols-2 gap-6">
+              <ChartCard title="Lowest stock" description="Compared with each item's restock level; red items need restocking">
+                {inventory.length ? (
+                  <RankedBarChart data={inventoryStats.lowest} seriesName="Quantity" />
+                ) : (
+                  <EmptyChart message="No inventory items yet" />
+                )}
+              </ChartCard>
+              <ChartCard title="Items by category">
+                <DonutChart data={inventoryStats.byCategory} valueFormatter={(x) => `${x} ${x === 1 ? "item" : "items"}`} />
+              </ChartCard>
+            </div>
+            {inventoryStats.restock.length > 0 && (
+              <Card className="p-5 border-destructive/40 bg-destructive/5">
+                <div className="flex items-center gap-2 mb-3">
+                  <AlertTriangle className="h-4 w-4 text-destructive" aria-hidden="true" />
+                  <h3 className="font-semibold text-destructive">Needs restocking</h3>
+                </div>
+                <div className="overflow-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Item</TableHead>
+                        <TableHead>Quantity</TableHead>
+                        <TableHead>Restock at</TableHead>
+                        <TableHead>Category</TableHead>
+                        <TableHead>Location</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {inventoryStats.restock.map((i) => (
+                        <TableRow key={i.id}>
+                          <TableCell className="font-medium">{i.name}</TableCell>
+                          <TableCell>
+                            <Badge variant="destructive">
+                              {isOutOfStock(i) ? "Out of stock" : `${getQty(i)} ${i.unit ?? ""}`}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">{getThreshold(i)}</TableCell>
+                          <TableCell>{i.category ?? "-"}</TableCell>
+                          <TableCell>{i.location ?? "-"}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </Card>
+            )}
+          </>
+        )}
+
+        {/* ================================ FORMS =============================== */}
+        {reportType === "forms" && (
+          <>
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="space-y-1.5 w-full sm:w-72">
+                <Label htmlFor="report-form" className="text-xs text-muted-foreground">
+                  Form
+                </Label>
+                <Select value={selectedForm ? selectedForm.id : ALL_FORMS} onValueChange={selectForm}>
+                  <SelectTrigger id="report-form">
+                    <SelectValue placeholder="Select a form..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_FORMS}>All forms (overview)</SelectItem>
+                    {pickerForms.map((f) => (
+                      <SelectItem key={f.id} value={f.id}>
+                        {f.title}
+                        {f.is_archived ? " (archived)" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {selectedForm && formSubmissions.length > 0 && (
+                <div className="space-y-1.5 flex-1 min-w-[200px] max-w-sm">
+                  <Label htmlFor="report-search" className="text-xs text-muted-foreground">
+                    Search responses
+                  </Label>
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+                    <Input
+                      id="report-search"
+                      placeholder="Search all answers..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-8 pr-8 h-9 text-sm"
+                    />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchQuery("")}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                        aria-label="Clear search"
+                      >
+                        <X className="h-3.5 w-3.5" aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {selectedForm ? (
+              <FormReport
+                form={selectedForm}
+                submissions={formSubmissions}
+                filtered={filteredSubmissions}
+                search={searchQuery}
+                previousCount={previousFormCounts ? previousFormCounts.get(selectedForm.id) ?? 0 : null}
+                compareLabel={compareLabel}
+                recent={recent}
+                range={chartRange}
+                granularity={granularity}
+              />
+            ) : (
+              <FormsOverview
+                forms={pickerForms}
+                submissions={periodSubmissions}
+                previousCounts={previousFormCounts}
+                compareLabel={compareLabel}
+                onOpen={(id) => selectForm(id)}
+              />
+            )}
+          </>
+        )}
+      </div>
+
+      {chartRange && reportType !== "inventory" && (
+        <p className="text-xs text-muted-foreground">
+          Charts cover {formatCount(daysInRange(chartRange.from, chartRange.to))} days, grouped by {granularityLabel(granularity)}.
+        </p>
       )}
     </div>
   );

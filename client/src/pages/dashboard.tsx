@@ -9,6 +9,7 @@ import {
   DollarSign, Clock, AlertTriangle, CheckCircle2, Users, TrendingUp, Image, AlertCircle,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { fetchAll, getThreshold, type InventoryRow } from "@/lib/report-utils";
 import { useAuth } from "@/hooks/use-auth";
 import { useOrganization } from "@/hooks/use-organization";
 import { SampleDataCard } from "@/components/sample-data-card";
@@ -36,7 +37,6 @@ interface DashboardData {
   submissionsByDay: { date: string; count: number }[];
 }
 
-const LOW_STOCK = 5;
 const CHART_DAYS = 14;
 
 /* --------------------------------- Helpers ---------------------------------- */
@@ -103,8 +103,13 @@ async function fetchDashboard(userId: string): Promise<DashboardData> {
   const [inventoryRes, donationsRes, volunteerRes, subsTotalRes, subsMonthRes, subsChartRes, subsRecentRes] =
     await Promise.all([
       supabase.from("inventory_items").select("*"),
-      supabase.from("donations").select("amount, created_at, donor_name").order("created_at", { ascending: false }),
-      supabase.from("volunteer_hours").select("hours, date, created_at, volunteer_name, activity").order("created_at", { ascending: false }),
+      // Paged so totals aren't capped at Supabase's 1000-row limit.
+      fetchAll<any>((f, t) =>
+        supabase.from("donations").select("id, amount, date, created_at, donor_name").order("created_at", { ascending: false }).order("id").range(f, t),
+      ).then((data) => ({ data, error: null })),
+      fetchAll<any>((f, t) =>
+        supabase.from("volunteer_hours").select("id, hours, date, created_at, volunteer_name, activity").order("created_at", { ascending: false }).order("id").range(f, t),
+      ).then((data) => ({ data, error: null })),
       // Real counts (head requests) so totals aren't capped by a row limit.
       formIds.length
         ? supabase.from("form_submissions").select("id", { count: "exact", head: true }).in("form_id", formIds)
@@ -166,7 +171,8 @@ async function fetchDashboard(userId: string): Promise<DashboardData> {
     submissionsThisMonth: subsMonthRes.count ?? 0,
     inventoryItems: inventory,
     totalDonations: donations.reduce((s: number, d: any) => s + Number(d.amount), 0),
-    donationsThisMonth: donations.filter((d: any) => d.created_at >= monthStartIso).reduce((s: number, d: any) => s + Number(d.amount), 0),
+    // By the donation's own date (what the Donations and Reports pages show), not when it was typed in.
+    donationsThisMonth: donations.filter((d: any) => String(d.date).startsWith(monthPrefix)).reduce((s: number, d: any) => s + Number(d.amount), 0),
     totalVolunteerHours: round2(volunteerHours.reduce((s: number, v: any) => s + Number(v.hours), 0)),
     // Uses the activity date (what the Volunteer Hours page shows), not the row's created_at.
     volunteerHoursThisMonth: round2(
@@ -203,7 +209,10 @@ export default function DashboardPage() {
   const fullName = user?.user_metadata?.full_name?.split(" ")[0] ?? "there";
 
   const lowStockItems = useMemo(
-    () => (data?.inventoryItems.filter((i) => i.quantity <= LOW_STOCK) ?? []).sort((a, b) => a.quantity - b.quantity),
+    () =>
+      (data?.inventoryItems.filter((i) => i.quantity <= getThreshold(i as unknown as InventoryRow)) ?? []).sort(
+        (a, b) => a.quantity - b.quantity,
+      ),
     [data]
   );
 
@@ -215,19 +224,19 @@ export default function DashboardPage() {
           label: "Total Raised",
           value: fmtMoney(data.totalDonations),
           sub: `${fmtMoney(data.donationsThisMonth)} this month`,
-          icon: DollarSign, color: "text-chart-2", bg: "bg-chart-2/10", href: "/donations",
+          icon: DollarSign, color: "text-chart-2", bg: "bg-chart-2/10", href: "/reports?tab=donations&period=this_month",
         },
         {
           label: "Volunteer Hours",
           value: fmtHours(data.totalVolunteerHours),
           sub: `${fmtHours(data.volunteerHoursThisMonth)} this month`,
-          icon: Clock, color: "text-chart-3", bg: "bg-chart-3/10", href: "/volunteer-hours",
+          icon: Clock, color: "text-chart-3", bg: "bg-chart-3/10", href: "/reports?tab=volunteers&period=this_month",
         },
         {
           label: "Form Submissions",
           value: data.totalSubmissions.toLocaleString(),
           sub: `${data.submissionsThisMonth.toLocaleString()} this month`,
-          icon: FileText, color: "text-primary", bg: "bg-primary/10", href: "/reports",
+          icon: FileText, color: "text-primary", bg: "bg-primary/10", href: "/reports?tab=forms&period=this_month",
         },
         {
           label: "Active Forms",
@@ -239,7 +248,7 @@ export default function DashboardPage() {
           label: "Inventory Items",
           value: data.inventoryItems.length.toLocaleString(),
           sub: lowStockItems.length ? `${lowStockItems.length} low or out of stock` : "All stocked",
-          icon: Package, color: "text-chart-5", bg: "bg-chart-5/10", href: "/inventory",
+          icon: Package, color: "text-chart-5", bg: "bg-chart-5/10", href: "/reports?tab=inventory",
         },
       ]
     : [];
@@ -334,7 +343,7 @@ export default function DashboardPage() {
               <h2 className="font-semibold text-lg">Submissions: Last {CHART_DAYS} Days</h2>
               <p className="text-sm text-muted-foreground">Form responses received per day</p>
             </div>
-            <Link href="/reports">
+            <Link href="/reports?tab=forms&period=last_30">
               <Button variant="outline" size="sm">
                 Reports <ArrowRight className="ml-1 h-3.5 w-3.5" aria-hidden="true" />
               </Button>
