@@ -94,10 +94,10 @@ export default function RefundsPage() {
         </p>
       </Section>
 
-      <Section title="8. Demo discount">
+      <Section title="8. Promotion codes">
         <p>
-          A 50% demo discount lasts as long as the subscription it was applied to. If that subscription is canceled and
-          ends, the discount ends too and can't be reused.
+          A promotion code's discount lasts as long as the terms shown at checkout, and never beyond the subscription it
+          was applied to. If that subscription is canceled and ends, the discount ends too and can't be reused.
         </p>
       </Section>
 

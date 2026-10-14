@@ -23,7 +23,7 @@ export const LEGAL = {
   /** Where disputes are heard. */
   venue: "the state and federal courts located in Texas", // TODO: confirm (e.g. a specific county)
   /** Shown as "Last updated". Change it whenever the terms change (YYYY-MM-DD). */
-  effectiveDate: "2026-10-13",
+  effectiveDate: "2026-10-14",
 };
 
 /**

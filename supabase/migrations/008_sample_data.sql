@@ -12,8 +12,10 @@
 --      forms' responses) and leaves real records alone.
 --   4. Adds sample_data_status(), which the dashboard uses to decide which
 --      button to show.
---   5. Removes seed_demo_data(). The guest demo needed anonymous sign-ins,
---      which are off.
+--   5. Removes the guest demo: seed_demo_data(), and the demo discount codes
+--      (demo_codes, get_my_demo_code(), organization_billing.discount_code).
+--      The demo needed anonymous sign-ins, which are off. Discounts now use
+--      Stripe promotion codes, entered at checkout.
 --
 -- Run the whole file at once in the Supabase SQL Editor. If anything fails,
 -- nothing is changed.
@@ -242,9 +244,12 @@ revoke execute on function public.clear_sample_data() from public, anon;
 grant execute on function public.clear_sample_data() to authenticated;
 
 -- -----------------------------------------------------------------------------
--- 5. Retire the guest demo
+-- 5. Retire the guest demo and its discount codes
 -- -----------------------------------------------------------------------------
 
 drop function if exists public.seed_demo_data();
+drop function if exists public.get_my_demo_code();
+drop table if exists public.demo_codes;
+alter table public.organization_billing drop column if exists discount_code;
 
 commit;

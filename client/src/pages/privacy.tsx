@@ -113,7 +113,6 @@ export default function PrivacyPage() {
         <ul>
           <li>Keep you signed in.</li>
           <li>Remember your light or dark theme and display preferences (for example, a list or grid view).</li>
-          <li>Remember a demo discount code, so it's ready when you choose a plan.</li>
         </ul>
         <p>Stripe's checkout and billing pages set their own cookies to process payments and prevent fraud.</p>
       </Section>

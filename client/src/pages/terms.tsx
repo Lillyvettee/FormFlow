@@ -140,13 +140,13 @@ export default function TermsPage() {
         </p>
       </Section>
 
-      <Section title="9. Demo discount codes">
+      <Section title="9. Promotion codes">
         <ul>
-          <li>Visitors who try the demo may receive a code for 50% off a paid plan.</li>
-          <li>Each code can be used once, by one organization. Codes can't be transferred, sold, combined with other offers, or exchanged for cash.</li>
+          <li>We may offer promotion codes for a discount on a paid plan. They're entered on the checkout page.</li>
+          <li>Each code's discount, length and limits are shown when you apply it. Codes can't be transferred, sold, combined with other offers, or exchanged for cash.</li>
           <li>
-            The discount applies for as long as that subscription stays active. If the subscription ends, the discount
-            ends with it and can't be reapplied to a new subscription.
+            If the subscription a code was applied to ends, the discount ends with it and can't be reapplied to a new
+            subscription.
           </li>
           <li>We may cancel codes that were obtained or used improperly.</li>
         </ul>
