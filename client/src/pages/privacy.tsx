@@ -73,11 +73,12 @@ export default function PrivacyPage() {
         </p>
         <p>
           <strong>People records and progress over time.</strong> An organization can keep a record for each person it
-          serves, such as their name, contact details, program, start date, status and staff notes. It can send a person
+          serves, such as their name, contact details, program, start date and status, along with dated case notes from staff and a record of help given to them (for example, a food box and its value). It can send a person
           a personal link to a form. Answers sent through that link are added to that person's record, so the
           organization can see how their answers change from one check-in to the next (for example, "confidence went
-          from 2 to 4"). Answers sent through a form's ordinary link aren't connected to anyone. Everyone on the
-          organization's team can see its people records.
+          from 2 to 4"). Answers sent through a form's ordinary link aren't connected to anyone. The organization
+          chooses which of its team members can see these records (by default, not team members with view-only
+          access), and its owners and admins can see a history of who added, changed or deleted them.
         </p>
         <p>
           <strong>Personal links.</strong> A personal link contains a private code that identifies the person it was
@@ -105,7 +106,7 @@ export default function PrivacyPage() {
         <ul>
           <li>
             Funder reports show <strong>totals, trends, fundraising goals and outcome summaries only</strong>, such as
-            "$12,400 raised", "320 volunteer hours" or "71% of participants improved". They never show the names, contact
+            "$12,400 raised", "320 volunteer hours", "210 people helped" or "71% of participants improved". They never show the names, contact
             details or individual answers of donors, volunteers, respondents or participants.
           </li>
           <li>
@@ -185,9 +186,11 @@ export default function PrivacyPage() {
           guessed. Payment details are handled entirely by Stripe.
         </p>
         <p>
-          <strong>Uploaded files.</strong> Photos, voice memos and other files submitted through forms, and logos added
-          to forms, are stored at long, hard-to-guess web addresses so they can be displayed. Anyone who has a file's
-          exact address can open it, so organizations should only share those addresses with people who should see them.
+          <strong>Uploaded files.</strong> Photos and voice memos submitted through forms are stored privately: only
+          the organization's team can open them, through links that expire after an hour. Logos and the organization's
+          media library are stored at long, hard-to-guess public web addresses so they can be displayed on forms; anyone
+          who has one of those exact addresses can open it. (Files submitted through forms before private storage was
+          introduced also use public addresses.)
         </p>
         <p>
           No system is perfectly secure, so please use a strong password and keep it private. If we learn of a breach

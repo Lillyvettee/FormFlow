@@ -22,7 +22,7 @@ import { monthLabel, parseOutcomes, type OutcomeResult } from "@/lib/outcomes";
 import { ChartCard, COLORS, DonutChart, ProgressBar, RankedBarChart, StatGrid, TimeSeriesChart, type StatItem } from "@/components/reports/report-ui";
 import { OutcomesReport } from "@/components/reports/outcomes-report";
 import { goalTiming } from "@/components/reports/goals-card";
-import { Clock, DollarSign, FileText, Lock, Printer, Users } from "lucide-react";
+import { Clock, DollarSign, FileText, HandHeart, Lock, Printer, Users } from "lucide-react";
 
 interface Totals {
   raised: number;
@@ -51,6 +51,15 @@ interface FunderReport {
   responses_by_form?: { name: string; value: number }[];
   goals?: { name: string; campaign: string | null; target: number; raised: number; start_date: string; end_date: string }[];
   outcomes?: OutcomeResult[];
+  /** Help given (migration 012), when shared. */
+  services?: {
+    count: number;
+    people_helped: number;
+    value: number;
+    previous: { count: number; people_helped: number; value: number } | null;
+    by_type: { name: string; count: number; value: number }[];
+    by_month: { month: string; value: number }[];
+  };
 }
 
 const num = (v: unknown) => Number(v) || 0;
@@ -255,6 +264,35 @@ export default function FunderReportPage() {
               </ChartCard>
               <ChartCard title="By activity">
                 <DonutChart data={pairs(report.hours_by_activity)} valueFormatter={(v) => `${formatHours(v)} hrs`} heightClass="h-36" />
+              </ChartCard>
+            </div>
+          </section>
+        )}
+
+        {has("services") && report.services && (
+          <section className="space-y-4">
+            <h2 className="text-xl font-semibold flex items-center gap-2">
+              <HandHeart className="h-5 w-5 text-primary" aria-hidden="true" /> Help given
+            </h2>
+            <StatGrid
+              compareLabel={compareLabel}
+              stats={[
+                { label: "Times help was given", value: formatCount(num(report.services.count)), change: percentChange(num(report.services.count), report.services.previous ? num(report.services.previous.count) : null) },
+                { label: "People helped", value: formatCount(num(report.services.people_helped)), change: percentChange(num(report.services.people_helped), report.services.previous ? num(report.services.previous.people_helped) : null) },
+                { label: "Value of help", value: formatCurrency(num(report.services.value)), change: percentChange(num(report.services.value), report.services.previous ? num(report.services.previous.value) : null) },
+                { label: "Value per person", value: num(report.services.people_helped) ? formatCurrency(num(report.services.value) / num(report.services.people_helped)) : "-" },
+              ]}
+            />
+            <div className="grid md:grid-cols-3 gap-6">
+              <ChartCard title="Help given by month" className="md:col-span-2">
+                <TimeSeriesChart data={months(report.services.by_month)} kind="bar" color={COLORS[1]} seriesName="Times" />
+              </ChartCard>
+              <ChartCard title="By type">
+                <DonutChart
+                  data={(report.services.by_type ?? []).map((t) => ({ name: String(t.name), value: num(t.count) }))}
+                  valueFormatter={(v) => `${v} ${v === 1 ? "time" : "times"}`}
+                  heightClass="h-36"
+                />
               </ChartCard>
             </div>
           </section>

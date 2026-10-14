@@ -30,6 +30,7 @@ export const FUNDER_SECTIONS = [
   { value: "forms", label: "Form responses (counts)" },
   { value: "goals", label: "Fundraising goals" },
   { value: "outcomes", label: "Outcomes" },
+  { value: "services", label: "Help given (totals and types)" },
 ] as const;
 export type FunderSection = (typeof FUNDER_SECTIONS)[number]["value"];
 
@@ -117,7 +118,15 @@ function NewShareForm({ onCreated, onCancel }: { onCreated: () => void; onCancel
     });
     setIsSaving(false);
     if (error) {
-      toast({ title: "Couldn't create the link", description: friendlyWriteError(error), variant: "destructive" });
+      // "Help given" needs migration 012; until then the database doesn't accept that section.
+      const needsUpdate = sections.includes("services") && /sections_check/.test(error.message ?? "");
+      toast({
+        title: "Couldn't create the link",
+        description: needsUpdate
+          ? "Sharing help given needs a database update (012_services_and_case_notes.sql). Untick Help given, or run the update first."
+          : friendlyWriteError(error),
+        variant: "destructive",
+      });
       return;
     }
     toast({ title: "Funder link created", description: "Copy it and send it to your funder." });

@@ -3,15 +3,20 @@
  * progress over time.
  *
  *   /people       everyone, with check-in counts; add people here
- *   /people/:id   one person: details, personal form links, progress on
- *                 outcome questions, and every check-in
+ *   /people/:id   one person: details, personal form links, help given,
+ *                 case notes, progress on outcome questions, and every check-in
+ *
+ * Adding someone first checks for a possible duplicate (same name, email or
+ * phone) and asks before creating a second record.
  *
  * Personal links: each person has a private token. Their link to a form is
  * the form's address plus ?p=<token> (lib/outcomes.ts), and responses sent
  * through it attach to their record. Resetting the token turns old links off.
  *
- * Viewers can see people; owners, admins and members can add and change
- * them (same rules as the other records). Owners and admins can rename,
+ * Who can see People is an organization setting (migration 015, chosen by
+ * owners and admins at the top of the page): by default owners, admins and
+ * members, not viewers. The database enforces it. Owners, admins and
+ * members can add and change people when they can see them. Owners and admins can rename,
  * hide and add fields, and split names (Customize fields, migration 011).
  */
 
@@ -35,6 +40,11 @@ import { friendlyWriteError } from "@/lib/db-errors";
 import { fetchAll, formatDate, toISODate, answerFields } from "@/lib/report-utils";
 import { newAccessToken, outcomeScore, personalFormLink } from "@/lib/outcomes";
 import { ResponseDialog } from "@/components/reports/form-report";
+import { PersonServices } from "@/components/people/person-services";
+import { PersonCaseNotes } from "@/components/people/person-case-notes";
+import { PersonHistory } from "@/components/people/person-history";
+import { PEOPLE_ACCESS_OPTIONS, usePeopleAccess, type PeopleAccess } from "@/lib/people-access";
+import { Lock } from "lucide-react";
 import { CustomFieldInputs, SplitNameInputs } from "@/components/custom-field-inputs";
 import { CustomizeFieldsButton } from "@/components/customize-fields-dialog";
 import {
@@ -74,6 +84,44 @@ const ALL = "__all__";
 /** True when the error means migration 010 hasn't been run yet. */
 const isMissingTable = (error: { code?: string } | null | undefined) => ["PGRST205", "42P01", "PGRST202"].includes(error?.code ?? "");
 
+/** Shown instead of People to members whose role can't see it. */
+function RestrictedNotice() {
+  return (
+    <Card className="p-6 max-w-xl space-y-2">
+      <h2 className="font-semibold flex items-center gap-2">
+        <Lock className="h-4 w-4 text-muted-foreground" aria-hidden="true" /> People is limited
+      </h2>
+      <p className="text-sm text-muted-foreground">
+        Your organization limits who can see the people it serves, their help given and case notes. Ask an owner or admin if you need
+        access.
+      </p>
+    </Card>
+  );
+}
+
+/** Owners and admins choose who can see People. */
+function PeopleAccessControl({ access, onChange }: { access: PeopleAccess; onChange: (next: PeopleAccess) => void }) {
+  const { isAdmin } = useOrganization();
+  if (!isAdmin) return null;
+  return (
+    <div className="flex items-center gap-2">
+      <Lock className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+      <Select value={access} onValueChange={(v) => onChange(v as PeopleAccess)}>
+        <SelectTrigger className="h-9 w-auto min-w-[15rem] text-sm" aria-label="Who can see People">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {PEOPLE_ACCESS_OPTIONS.map((o) => (
+            <SelectItem key={o.value} value={o.value}>
+              Visible to: {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 function SetupNotice() {
   return (
     <Card className="p-6 max-w-xl">
@@ -89,6 +137,16 @@ function SetupNotice() {
 // ===========================================================================
 // Add / edit dialog
 // ===========================================================================
+
+/** A possible duplicate from find_similar_people (migration 012). */
+interface SimilarPerson {
+  id: string;
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  program: string | null;
+  matched_on: string;
+}
 
 interface Draft {
   full_name: string;
@@ -136,21 +194,48 @@ function PersonDialog({
   });
   const [customValues, setCustomValues] = useState<CustomValues>(() => (person === "new" ? {} : customOf(person)));
   const [customErrors, setCustomErrors] = useState<Record<string, string>>({});
+  /** Possible duplicates found when saving; the person decides before anything is created. */
+  const [similar, setSimilar] = useState<SimilarPerson[] | null>(null);
   const [showErrors, setShowErrors] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const set = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
+  const set = (patch: Partial<Draft>) => {
+    setDraft((d) => ({ ...d, ...patch }));
+    if ("full_name" in patch || "first_name" in patch || "last_name" in patch || "email" in patch || "phone" in patch) setSimilar(null);
+  };
 
   const fullName = fields.splitNames ? joinName(draft.first_name, draft.last_name) : draft.full_name.trim();
   const nameError = fullName ? null : fields.splitNames ? "Enter a first or last name." : "Enter a name.";
   const emailError =
     fields.shows("email") && draft.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.email.trim()) ? "Enter a valid email or leave it blank." : null;
 
-  const save = async () => {
+  const save = async (skipDuplicateCheck = false) => {
     setShowErrors(true);
     const prepared = prepareCustomValues(fields.custom, customValues);
     setCustomErrors(prepared.errors);
     if (nameError || emailError || Object.keys(prepared.errors).length || isSaving) return;
     setIsSaving(true);
+
+    // Ask before creating what may be a second record for the same person.
+    // Also checked on edits that change the name, email or phone.
+    const identityChanged =
+      person === "new" ||
+      fullName !== person.full_name ||
+      (draft.email.trim() || null) !== person.email ||
+      (draft.phone.trim() || null) !== person.phone;
+    if (!skipDuplicateCheck && identityChanged) {
+      const { data, error } = await supabase.rpc("find_similar_people", {
+        p_name: fullName,
+        p_email: fields.shows("email") ? draft.email.trim() || null : null,
+        p_phone: fields.shows("phone") ? draft.phone.trim() || null : null,
+        p_exclude: person === "new" ? null : person.id,
+      });
+      // If the check isn't available yet (migration 012), just save.
+      if (!error && Array.isArray(data) && data.length) {
+        setSimilar(data as SimilarPerson[]);
+        setIsSaving(false);
+        return;
+      }
+    }
 
     // Hidden fields are left out, so values saved before they were hidden are kept.
     const row: Record<string, unknown> = {
@@ -269,13 +354,42 @@ function PersonDialog({
             </div>
           )}
         </div>
+        {similar && similar.length > 0 && (
+          <div role="alert" className="rounded-md border border-amber-500/50 bg-amber-500/10 p-4 space-y-3">
+            <p className="text-sm font-medium">This may be someone who's already here:</p>
+            <ul className="space-y-1.5 text-sm">
+              {similar.map((m) => (
+                <li key={m.id} className="flex flex-wrap items-center justify-between gap-2">
+                  <span>
+                    <strong>{m.full_name}</strong>
+                    <span className="text-muted-foreground">
+                      {[m.program, m.email, m.phone].filter(Boolean).length ? ` · ${[m.program, m.email, m.phone].filter(Boolean).join(" · ")}` : ""} (same {m.matched_on})
+                    </span>
+                  </span>
+                  <Link href={`/people/${m.id}`} onClick={onClose} className="text-primary underline underline-offset-4 hover:no-underline">
+                    Open existing
+                  </Link>
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-muted-foreground">
+              {person === "new" ? "If this is a different person, choose Add anyway." : "If this is a different person, choose Save anyway."}
+            </p>
+          </div>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={isSaving}>
             Cancel
           </Button>
-          <Button onClick={save} disabled={isSaving}>
-            {isSaving ? "Saving..." : person === "new" ? "Add person" : "Save"}
-          </Button>
+          {similar && similar.length > 0 ? (
+            <Button onClick={() => save(true)} disabled={isSaving}>
+              {isSaving ? "Saving..." : person === "new" ? "Add anyway" : "Save anyway"}
+            </Button>
+          ) : (
+            <Button onClick={() => save()} disabled={isSaving}>
+              {isSaving ? "Saving..." : person === "new" ? "Add person" : "Save"}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -289,6 +403,7 @@ function PersonDialog({
 export default function PeoplePage() {
   const { canEdit } = useOrganization();
   const fields = useTrackerFields("people");
+  const peopleAccess = usePeopleAccess();
   const { toast } = useToast();
   const [, navigate] = useLocation();
   const [people, setPeople] = useState<Person[]>([]);
@@ -368,6 +483,19 @@ export default function PeoplePage() {
           <p className="text-muted-foreground">The people you serve, and how they're doing over time</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {peopleAccess.isAvailable && !peopleAccess.isLoading && (
+            <PeopleAccessControl
+              access={peopleAccess.access}
+              onChange={async (next) => {
+                try {
+                  await peopleAccess.save(next);
+                  toast({ title: "Saved", description: `People is now visible to: ${PEOPLE_ACCESS_OPTIONS.find((o) => o.value === next)?.label.toLowerCase()}.` });
+                } catch (err) {
+                  toast({ title: "Couldn't change who can see People", description: friendlyWriteError(err as { message?: string }), variant: "destructive" });
+                }
+              }}
+            />
+          )}
           {state === "ready" && <CustomizeFieldsButton fields={fields} />}
           {canEdit && state === "ready" && (
             <Button onClick={() => setAdding(true)}>
@@ -379,7 +507,9 @@ export default function PeoplePage() {
 
       <ReadOnlyNotice />
 
-      {state === "missing" ? (
+      {!peopleAccess.isLoading && !peopleAccess.canView ? (
+        <RestrictedNotice />
+      ) : state === "missing" ? (
         <SetupNotice />
       ) : (
         <>
@@ -533,6 +663,7 @@ export function PersonPage() {
   const { id } = useParams<{ id: string }>();
   const { canEdit } = useOrganization();
   const fields = useTrackerFields("people");
+  const peopleAccess = usePeopleAccess();
   const { toast } = useToast();
   const [, navigate] = useLocation();
   const [person, setPerson] = useState<Person | null>(null);
@@ -637,6 +768,13 @@ export function PersonPage() {
     return (
       <div className="p-6 max-w-5xl mx-auto">
         <SetupNotice />
+      </div>
+    );
+  }
+  if (!peopleAccess.isLoading && !peopleAccess.canView) {
+    return (
+      <div className="p-6 max-w-5xl mx-auto">
+        <RestrictedNotice />
       </div>
     );
   }
@@ -769,6 +907,12 @@ export function PersonPage() {
           </>
         )}
       </Card>
+
+      <PersonServices personId={person.id} personName={person.full_name} />
+
+      <PersonCaseNotes personId={person.id} />
+
+      <PersonHistory personId={person.id} />
 
       {/* ----- Progress ----- */}
       <div className="space-y-3">

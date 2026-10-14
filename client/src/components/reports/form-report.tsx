@@ -37,6 +37,7 @@ import {
   type Granularity,
 } from "@/lib/report-utils";
 import { ChartCard, DonutChart, EmptyChart, RankedBarChart, StatGrid, TimeSeriesChart } from "@/components/reports/report-ui";
+import { useFileLink } from "@/lib/uploads";
 import { Eye, FileAudio, Image as ImageIcon, Paperclip, Search } from "lucide-react";
 import type { Form, FormField, FormSubmission } from "@/types/database";
 
@@ -48,10 +49,15 @@ const AUDIO_SHOWN = 6;
 
 export const fieldsOf = (form: Form | undefined): FormField[] => answerFields(form?.fields as FormField[] | null);
 
-/** "View photo" / "Play" style link for an uploaded file. */
-function MediaLink({ field, url }: { field: FormField; url: string }) {
+/**
+ * "View photo" / "Play" style link for an uploaded file. Private files get a
+ * link that works for an hour, made when it's shown (lib/uploads.ts).
+ */
+function MediaLink({ field, url: value }: { field: FormField; url: string }) {
+  const { url, failed } = useFileLink(value);
   const Icon = field.type === "image" ? ImageIcon : field.type === "audio" ? FileAudio : Paperclip;
   const label = field.type === "image" ? "View photo" : field.type === "audio" ? "Play recording" : "Open file";
+  if (!url) return <span className="text-xs text-muted-foreground">{failed ? "File unavailable" : "Loading..."}</span>;
   return (
     <a
       href={url}
@@ -63,6 +69,30 @@ function MediaLink({ field, url }: { field: FormField; url: string }) {
       {label}
     </a>
   );
+}
+
+/** A photo that opens full size; private photos load through a short-lived link. */
+function PhotoThumb({ value, alt, large = false }: { value: string; alt: string; large?: boolean }) {
+  const { url, failed } = useFileLink(value);
+  if (!url) {
+    return (
+      <div className={`${large ? "h-32 w-48" : "aspect-square"} rounded-md border bg-muted flex items-center justify-center text-xs text-muted-foreground`}>
+        {failed ? "Unavailable" : "Loading..."}
+      </div>
+    );
+  }
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer" className={large ? "inline-block" : "block aspect-square overflow-hidden rounded-md border bg-muted"}>
+      <img src={url} alt={alt} loading="lazy" className={large ? "max-h-64 rounded-md border" : "h-full w-full object-cover hover:opacity-90"} />
+    </a>
+  );
+}
+
+/** A voice memo player; private recordings load through a short-lived link. */
+function AudioPlayer({ value, className }: { value: string; className?: string }) {
+  const { url, failed } = useFileLink(value);
+  if (!url) return <span className="text-xs text-muted-foreground">{failed ? "Recording unavailable" : "Loading..."}</span>;
+  return <audio controls preload="none" src={url} className={className} />;
 }
 
 /** An answer on screen: links for files, text for everything else. */
@@ -225,16 +255,14 @@ function MediaAnswers({ field, subs }: { field: FormField; subs: FormSubmission[
       ) : field.type === "image" ? (
         <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
           {items.slice(0, limit).map((i) => (
-            <a key={i.id} href={i.url} target="_blank" rel="noopener noreferrer" className="block aspect-square overflow-hidden rounded-md border bg-muted">
-              <img src={i.url} alt={`Photo from ${formatDate(i.date)}`} loading="lazy" className="h-full w-full object-cover hover:opacity-90" />
-            </a>
+            <PhotoThumb key={i.id} value={i.url} alt={`Photo from ${formatDate(i.date)}`} />
           ))}
         </div>
       ) : field.type === "audio" ? (
         <ul className="space-y-2">
           {items.slice(0, limit).map((i) => (
             <li key={i.id} className="flex flex-wrap items-center gap-3">
-              <audio controls preload="none" src={i.url} className="h-9 max-w-full" />
+              <AudioPlayer value={i.url} className="h-9 max-w-full" />
               <span className="text-xs text-muted-foreground">{formatDate(i.date)}</span>
             </li>
           ))}
@@ -341,11 +369,9 @@ export function ResponseDialog({
                 <dt className="text-xs font-medium text-muted-foreground">{f.label || "Untitled question"}</dt>
                 <dd className="text-sm whitespace-pre-line break-words">
                   {url && f.type === "image" ? (
-                    <a href={url} target="_blank" rel="noopener noreferrer">
-                      <img src={url} alt={f.label || "Uploaded photo"} className="max-h-64 rounded-md border" />
-                    </a>
+                    <PhotoThumb value={url} alt={f.label || "Uploaded photo"} large />
                   ) : url && f.type === "audio" ? (
-                    <audio controls preload="none" src={url} className="w-full" />
+                    <AudioPlayer value={url} className="w-full" />
                   ) : url ? (
                     <MediaLink field={f} url={url} />
                   ) : isBlank(value) ? (

@@ -55,7 +55,7 @@ export const getEmbedUrl = (formId: string): string => `${window.location.origin
 export function embedCode(formId: string, title: string): string {
   const origin = window.location.origin;
   const safeTitle = title.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
-  return `<iframe src="${getEmbedUrl(formId)}" title="${safeTitle}" data-hummotion-form="${formId}" style="width:100%;max-width:720px;height:700px;border:0;" loading="lazy"></iframe>
+  return `<iframe src="${getEmbedUrl(formId)}" title="${safeTitle}" data-hummotion-form="${formId}" style="width:100%;max-width:720px;height:700px;border:0;" loading="lazy" allow="microphone"></iframe>
 <script>
 window.addEventListener("message", function (e) {
   if (e.origin !== "${origin}" || !e.data || e.data.type !== "${RESIZE_MESSAGE}") return;

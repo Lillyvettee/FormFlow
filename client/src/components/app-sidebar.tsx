@@ -18,6 +18,7 @@ import {
   SidebarHeader,
 } from "@/components/ui/sidebar";
 import { supabase } from "@/lib/supabase";
+import { usePeopleAccess } from "@/lib/people-access";
 
 const navItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
@@ -43,6 +44,8 @@ export function AppSidebar() {
   const [location] = useLocation();
   const { user } = useAuth();
   const { organization, branding } = useOrganization();
+  // People is hidden for roles the organization doesn't let see it (migration 015).
+  const { canView: canViewPeople } = usePeopleAccess();
   // Fall back to the HumMotion logo if the organization's logo link is broken.
   const [logoFailed, setLogoFailed] = useState(false);
   useEffect(() => setLogoFailed(false), [branding.logoUrl]);
@@ -109,7 +112,7 @@ export function AppSidebar() {
           <SidebarGroupLabel>Impact Tracking</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {phase2Items.map((item) => (
+              {phase2Items.filter((item) => item.url !== "/people" || canViewPeople).map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild isActive={isActive(item.url)}>
                     <Link href={item.url} data-testid={`link-nav-${item.title.toLowerCase().replace(" ", "-")}`}>

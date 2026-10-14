@@ -144,6 +144,8 @@ export interface FormField {
    * by position: the first option is 1.
    */
   outcome?: { betterWhen: 'higher' | 'lower' }
+  /** Show this question only when an earlier answer matches (see lib/form-logic.ts). */
+  showIf?: { fieldId: string; op: 'is' | 'is_not' | 'answered' | 'not_answered'; value?: string }
 }
 
 export interface FormSettings {
@@ -151,6 +153,15 @@ export interface FormSettings {
   successMessage?: string
   notificationEmail?: string
   allowMultipleSubmissions?: boolean
+  /** Emails sent for each response (supabase/functions/form-notify). */
+  notifications?: {
+    /** Staff addresses alerted to every response (up to 5). */
+    staffEmails?: string[]
+    /** The form's email question whose answer gets a confirmation. */
+    confirmEmailFieldId?: string | null
+    confirmMessage?: string | null
+    includeAnswers?: boolean
+  }
   /** The form's own look; unset values fall back to the organization's branding. See lib/form-appearance.ts. */
   theme?: {
     primaryColor?: string

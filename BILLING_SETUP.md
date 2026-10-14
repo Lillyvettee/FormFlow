@@ -25,6 +25,10 @@ In the Supabase dashboard, open **SQL Editor** and run each file, in order:
 6. `supabase/migrations/009_fundraising_goals.sql` (fundraising goals with progress bars on the Reports page)
 7. `supabase/migrations/010_people_outcomes_funder_portals.sql` (People, outcome tracking and funder portals)
 8. `supabase/migrations/011_custom_fields.sql` (Customize fields on Donations, Volunteer hours, Inventory, Links and People)
+9. `supabase/migrations/012_services_and_case_notes.sql` (Help given, case notes and duplicate warnings on People)
+10. `supabase/migrations/013_form_notifications.sql` (email alerts and confirmations for form responses; also deploy `form-notify` in step 4)
+11. `supabase/migrations/014_private_form_uploads.sql` (private storage for form photos and voice memos, and upload limits)
+12. `supabase/migrations/015_people_access_and_history.sql` (who can see People, and a change history for admins)
 
 `005_trial_reminders.sql` comes later, in step 6.
 
@@ -74,13 +78,14 @@ npx supabase functions deploy stripe-webhook --no-verify-jwt
 npx supabase functions deploy trial-reminders --no-verify-jwt
 npx supabase functions deploy request-account-deletion
 npx supabase functions deploy confirm-account-deletion --no-verify-jwt
+npx supabase functions deploy form-notify --no-verify-jwt
 ```
 
 For `CRON_SECRET`, use any long random value, such as a password from a password manager. Keep it handy for step 6.
 
-`--no-verify-jwt` is required for `stripe-webhook`, `trial-reminders` and `confirm-account-deletion`, because their callers aren't signed in to Supabase. The webhook checks Stripe's signature, the reminders check `CRON_SECRET`, and account deletion checks the one-time link from the email.
+`--no-verify-jwt` is required for `stripe-webhook`, `trial-reminders`, `confirm-account-deletion` and `form-notify`, because their callers aren't signed in to Supabase. The webhook checks Stripe's signature, the reminders check `CRON_SECRET`, account deletion checks the one-time link from the email, and form-notify only sends once per new response (within 15 minutes of it being submitted) with an hourly cap per form.
 
-Account deletion emails, like trial reminders, go to customers, so they need `NOTIFY_FROM` (step 3).
+Account deletion emails and form notifications, like trial reminders, go to customers, so they need `NOTIFY_FROM` (step 3). `form-notify` doesn't need the Stripe secrets, so form emails work even before billing is set up.
 
 ## 5. Connect Stripe to the webhook
 

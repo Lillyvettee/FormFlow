@@ -14,6 +14,7 @@
 // ============================================================
 
 import Stripe from "npm:stripe@17.7.0";
+import { requireEnv } from "./env.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 
 export type PaidPlan = "starter" | "mission";
@@ -33,11 +34,7 @@ export const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-export function requireEnv(name: string): string {
-  const value = Deno.env.get(name);
-  if (!value) throw new Error(`Missing secret ${name}. Set it with: supabase secrets set ${name}=...`);
-  return value;
-}
+export { requireEnv };
 
 /** JSON response with CORS headers. Errors use { error: "message" }, which the app shows as-is. */
 export function json(body: unknown, status = 200): Response {

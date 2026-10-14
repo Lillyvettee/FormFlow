@@ -9,6 +9,11 @@
  * Look: the form's own background color, accent color and logo
  * (forms.settings.theme), falling back to the organization's branding.
  *
+ * Conditional questions (lib/form-logic.ts) appear and disappear as people
+ * answer; hidden questions aren't required and their answers aren't saved.
+ * After saving, the form-notify function sends any email alerts and
+ * confirmations set up for the form.
+ *
  * Flow:
  *   1. Load the form (only if it is published).
  *   2. Respondent fills in fields, including optional photo and voice memo uploads.
@@ -20,9 +25,10 @@
  * Backend assumptions:
  *   - forms: anonymous users can SELECT rows where is_published = true.
  *   - form_submissions: anonymous users can INSERT (but not read).
- *   - Storage bucket "media": anonymous users can upload under "public/".
- *     Files are stored at public/<formId>/<random id>.<ext>, which still sits
- *     under the "public/" folder that existing storage policies expect.
+ *   - Storage bucket "form-uploads" (private, migration 014): anonymous users
+ *     can upload to <formId>/<random id>.<ext> for published forms; only the
+ *     organization can open the files. Before that migration, uploads fall
+ *     back to the public "media" bucket under public/<formId>/.
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -41,6 +47,8 @@ import { supabase } from "@/lib/supabase";
 import { setBrandColor } from "@/lib/brand-color";
 import { getAppearance, prefersDarkText, RESIZE_MESSAGE } from "@/lib/form-appearance";
 import { PERSON_LINK_PARAM } from "@/lib/outcomes";
+import { isFieldVisible } from "@/lib/form-logic";
+import { FORM_UPLOADS_BUCKET, privateFileRef } from "@/lib/uploads";
 import {
   CheckCircle2,
   FileText,
@@ -460,7 +468,7 @@ function AudioRecordField({
         </div>
       )}
 
-      {/* Recording indicator. The original used a "●" text symbol; this is a
+      {/* Recording indicator. The original used a "â—" text symbol; this is a
           styled dot instead, hidden from screen readers, with the time read out. */}
       {recording && (
         <p className="flex items-center gap-2 text-xs text-destructive" role="status">
@@ -567,8 +575,16 @@ export default function SubmitFormPage({ embed = false }: { embed?: boolean; par
   const [submitError, setSubmitError] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [followUpCountdown, setFollowUpCountdown] = useState(FOLLOW_UP_DELAY_SECONDS);
+  /**
+   * Files uploaded during the current attempt. If saving fails they're removed
+   * again; that works for the older public bucket, while private uploads
+   * can't be removed by respondents and simply stay private.
+   */
+  const uploadsRef = useRef<{ bucket: string; path: string }[]>([]);
 
   const fields = (form?.fields as FormField[] | null) ?? [];
+  /** Questions shown right now, given the answers so far (conditional questions). */
+  const visibleFields = fields.filter((f) => isFieldVisible(f, fields, answers));
   const followUpFormId = getFollowUpId(form);
   const appearance = getAppearance(form);
   const logoUrl = appearance.logoUrl ?? branding?.logo_url ?? null;
@@ -723,7 +739,7 @@ export default function SubmitFormPage({ embed = false }: { embed?: boolean; par
    */
   const validate = (): Record<string, string> => {
     const errors: Record<string, string> = {};
-    for (const field of fields) {
+    for (const field of visibleFields) {
       const value = answers[field.id];
       const isMedia = field.type === "image" || field.type === "audio";
 
@@ -776,7 +792,7 @@ export default function SubmitFormPage({ embed = false }: { embed?: boolean; par
 
     const errors = validate();
     setFieldErrors(errors);
-    const firstInvalid = fields.find((f) => errors[f.id]);
+    const firstInvalid = visibleFields.find((f) => errors[f.id]);
     if (firstInvalid) {
       document.getElementById(`field-${firstInvalid.id}`)?.focus();
       toast({
@@ -794,43 +810,67 @@ export default function SubmitFormPage({ embed = false }: { embed?: boolean; par
     }
 
     setIsSubmitting(true);
-    const uploadedPaths: string[] = [];
+    uploadsRef.current = [];
 
     try {
-      // 1. Upload files.
+      // 1. Upload files, privately: only the organization can open them
+      //    (lib/uploads.ts). Before migration 014 there's no private bucket,
+      //    so they go to the public media bucket as they used to.
       const fileUrls: Record<string, string> = {};
-      for (const field of fields) {
+      for (const field of visibleFields) {
         const file = files[field.id];
         if (!file) continue;
-        const path = `public/${form.id}/${randomId()}.${safeExtension(file)}`;
-        const { error: uploadError } = await supabase.storage
-          .from(STORAGE_BUCKET)
-          .upload(path, file, { contentType: file.type || undefined, upsert: false });
+        const name = `${randomId()}.${safeExtension(file)}`;
+        // Plain type ("audio/webm", not "audio/webm;codecs=opus") so storage's allowed-types check recognizes it.
+        const options = { contentType: file.type.split(";")[0] || undefined, upsert: false };
+        const privatePath = `${form.id}/${name}`;
+        const { error: privateError } = await supabase.storage.from(FORM_UPLOADS_BUCKET).upload(privatePath, file, options);
+        if (!privateError) {
+          uploadsRef.current.push({ bucket: FORM_UPLOADS_BUCKET, path: privatePath });
+          fileUrls[field.id] = privateFileRef(privatePath);
+          continue;
+        }
+        if (!/bucket not found/i.test(privateError.message)) throw new Error(`Couldn't upload "${field.label}": ${privateError.message}`);
+        const publicPath = `public/${form.id}/${name}`;
+        const { error: uploadError } = await supabase.storage.from(STORAGE_BUCKET).upload(publicPath, file, options);
         if (uploadError) throw new Error(`Couldn't upload "${field.label}": ${uploadError.message}`);
-        uploadedPaths.push(path);
-        fileUrls[field.id] = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(path).data.publicUrl;
+        uploadsRef.current.push({ bucket: STORAGE_BUCKET, path: publicPath });
+        fileUrls[field.id] = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(publicPath).data.publicUrl;
       }
 
       // 2. Clean up answers: trim text, drop empty values, keep only current fields.
       const cleaned: Record<string, string | number | boolean> = {};
-      for (const field of fields) {
+      for (const field of visibleFields) {
         const value = answers[field.id];
         if (value === undefined || value === "") continue;
         cleaned[field.id] = typeof value === "string" ? value.trim() : value;
       }
 
-      // 3. Save the submission.
-      const { error: insertError } = await supabase
-        .from("form_submissions")
-        .insert({ form_id: form.id, data: { ...cleaned, ...fileUrls }, ...(personToken ? { person_token: personToken } : {}) });
+      // 3. Save the submission. The id is made here because respondents can't
+      //    read responses back, and form-notify needs it to send the emails.
+      const submissionId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : null;
+      const { error: insertError } = await supabase.from("form_submissions").insert({
+        ...(submissionId ? { id: submissionId } : {}),
+        form_id: form.id,
+        data: { ...cleaned, ...fileUrls },
+        ...(personToken ? { person_token: personToken } : {}),
+      });
       if (insertError) throw new Error(insertError.message);
+
+      // 4. Email alerts and confirmations, if the form has them. The response is
+      //    already saved, so a failed email never shows as a failed submission.
+      const notify = (form.settings as { notifications?: { staffEmails?: string[]; confirmEmailFieldId?: string | null } } | null)?.notifications;
+      if (submissionId && (notify?.staffEmails?.length || notify?.confirmEmailFieldId)) {
+        supabase.functions.invoke("form-notify", { body: { submissionId } }).catch(() => {});
+      }
 
       setSubmitted(true);
       setFollowUpCountdown(FOLLOW_UP_DELAY_SECONDS);
     } catch (err) {
       // Remove anything uploaded during this failed attempt.
-      if (uploadedPaths.length) {
-        supabase.storage.from(STORAGE_BUCKET).remove(uploadedPaths).catch(() => {});
+      for (const bucket of new Set(uploadsRef.current.map((u) => u.bucket))) {
+        const paths = uploadsRef.current.filter((u) => u.bucket === bucket).map((u) => u.path);
+        supabase.storage.from(bucket).remove(paths).catch(() => {});
       }
       setSubmitError(
         err instanceof Error && err.message
@@ -969,7 +1009,7 @@ export default function SubmitFormPage({ embed = false }: { embed?: boolean; par
 
             {fields.length === 0 && <p className="text-sm text-muted-foreground">This form has no questions yet.</p>}
 
-            {fields.map((field) => {
+            {visibleFields.map((field) => {
               const inputId = `field-${field.id}`;
               const error = fieldErrors[field.id];
               const errorId = error ? `${inputId}-error` : undefined;

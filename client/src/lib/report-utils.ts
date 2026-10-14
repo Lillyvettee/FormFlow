@@ -8,6 +8,7 @@
  */
 
 import type { FormField, FormSubmission } from "@/types/database";
+import { isPrivateFileRef, PRIVATE_FILE_TEXT } from "@/lib/uploads";
 
 // ===========================================================================
 // Types
@@ -292,9 +293,13 @@ export const getAnswer = (s: FormSubmission, fieldId: string): unknown =>
 
 export const isBlank = (v: unknown): boolean => v === undefined || v === null || v === "";
 
-/** A link to an uploaded file, for photo, voice memo and file fields. */
+/**
+ * An uploaded file for photo, voice memo and file fields: a private file
+ * reference (lib/uploads.ts) or an older public link. Show it with the
+ * components in components/uploaded-file.tsx, which open private files.
+ */
 export const mediaUrl = (field: FormField, value: unknown): string | null =>
-  MEDIA_FIELD_TYPES.has(field.type) && typeof value === "string" && /^https:\/\//.test(value) ? value : null;
+  MEDIA_FIELD_TYPES.has(field.type) && typeof value === "string" && (/^https:\/\//.test(value) || isPrivateFileRef(value)) ? value : null;
 
 /** Display text for any answer value. Checkbox booleans become Yes/No and lists are joined. */
 export const formatAnswer = (value: unknown): string => {
@@ -302,6 +307,8 @@ export const formatAnswer = (value: unknown): string => {
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (Array.isArray(value)) return value.map(formatAnswer).join(", ");
   if (typeof value === "object") return JSON.stringify(value);
+  // Private files only open inside HumMotion, so exports say so instead of a link.
+  if (isPrivateFileRef(value)) return PRIVATE_FILE_TEXT;
   return String(value);
 };
 

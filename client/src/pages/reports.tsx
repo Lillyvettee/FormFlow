@@ -12,6 +12,8 @@
  *   - Inventory         current stock, categories, restock list
  *   - Form responses    every form at a glance, or one form question by question
  *   - Outcomes          how the people you serve change between check-ins
+ *   - Services          help given to people (migration 012): how much, to how
+ *                       many people, of what kinds, and its value
  *
  * Funder portals: the "Funder portals" button manages private links to a
  * live, read-only report for funders (components/reports/funder-shares-dialog).
@@ -52,6 +54,7 @@ import {
   Download,
   FileDown,
   FileText,
+  HandHeart,
   Info,
   Package,
   Search,
@@ -122,7 +125,7 @@ import type { Form, FormSubmission } from "@/types/database";
 // Constants
 // ===========================================================================
 
-type ReportType = "impact" | "donations" | "volunteers" | "inventory" | "forms" | "outcomes";
+type ReportType = "impact" | "donations" | "volunteers" | "inventory" | "forms" | "outcomes" | "services";
 
 const REPORT_TYPES: { value: ReportType; label: string; title: string; icon: LucideIcon }[] = [
   { value: "impact", label: "Impact overview", title: "Impact Report", icon: TrendingUp },
@@ -131,6 +134,7 @@ const REPORT_TYPES: { value: ReportType; label: string; title: string; icon: Luc
   { value: "inventory", label: "Inventory", title: "Inventory Report", icon: Package },
   { value: "forms", label: "Form responses", title: "Form Responses Report", icon: FileText },
   { value: "outcomes", label: "Outcomes", title: "Outcomes Report", icon: Activity },
+  { value: "services", label: "Help given", title: "Help Given Report", icon: HandHeart },
 ];
 
 const PERIOD_PRESETS: { value: Exclude<PeriodPreset, "custom">; label: string }[] = [
@@ -144,6 +148,20 @@ const PERIOD_PRESETS: { value: Exclude<PeriodPreset, "custom">; label: string }[
 /** "All forms" option in the form picker. Radix Select can't use "" as an item value. */
 const ALL_FORMS = "__all__";
 const TOP_DONORS = 10;
+
+/** A services row with the person's name (migration 012). */
+interface ServiceRow {
+  id: string;
+  person_id: string;
+  date: string;
+  service_type: string;
+  value: number | string | null;
+  quantity: number | null;
+  /** One person; typed loosely because the client can't tell it isn't a list. */
+  person: { full_name: string } | { full_name: string }[] | null;
+}
+
+const serviceName = (x: ServiceRow): string => (Array.isArray(x.person) ? x.person[0]?.full_name : x.person?.full_name) ?? "";
 
 /** Submission columns needed only to count the previous period. */
 type SubmissionStub = Pick<FormSubmission, "form_id" | "submitted_at">;
@@ -228,6 +246,8 @@ export default function ReportsPage() {
   /** Donors who gave before the period started, to tell new donors from returning ones. */
   const [priorDonors, setPriorDonors] = useState<Set<string> | null>(null);
   const [hasSampleData, setHasSampleData] = useState(false);
+  /** Help given in the period and the previous one; null until loaded, "missing" before migration 012. */
+  const [services, setServices] = useState<ServiceRow[] | "missing">([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const goals = useGoals();
@@ -298,7 +318,13 @@ export default function ReportsPage() {
         if (dateTo) out = out.lte("date", dateTo);
         return out;
       };
-      const [donationsRes, hoursRes, subsRes, prevSubsRes, priorRes] = await Promise.allSettled([
+      const servicesPromise = fetchAll<ServiceRow>((f, t) =>
+        dated(supabase.from("services").select("id, person_id, date, service_type, value, quantity, person:people(full_name)"))
+          .order("date")
+          .order("id")
+          .range(f, t),
+      );
+      const [donationsRes, hoursRes, subsRes, prevSubsRes, priorRes, servicesRes] = await Promise.allSettled([
         fetchAll<DonationRow>((f, t) =>
           dated(supabase.from("donations").select("*").eq("is_sample", false)).order("date").order("id").range(f, t),
         ),
@@ -327,6 +353,7 @@ export default function ReportsPage() {
               supabase.from("donations").select("donor_name").eq("is_sample", false).lt("date", dateFrom).order("id").range(f, t),
             )
           : Promise.resolve(null),
+        servicesPromise,
       ]);
       if (cancelled) return;
 
@@ -336,6 +363,9 @@ export default function ReportsPage() {
       else failed.push("volunteer hours");
       if (subsRes.status === "fulfilled") setSubmissions(subsRes.value);
       else failed.push("form responses");
+      // Before migration 012 there's no services table; the tab explains that instead of a toast.
+      if (servicesRes.status === "fulfilled") setServices(servicesRes.value);
+      else setServices(/services|schema cache/i.test(String(servicesRes.reason?.message)) ? "missing" : []);
       setPreviousSubmissions(prevSubsRes.status === "fulfilled" ? prevSubsRes.value : null);
       setPriorDonors(
         priorRes.status === "fulfilled" && priorRes.value ? new Set(priorRes.value.map((d) => normalizeName(d.donor_name))) : null,
@@ -490,6 +520,29 @@ export default function ReportsPage() {
   }, [periodHours, prevHours, granularity, chartRange]);
 
   // -------------------------------------------------------------------------
+  // Help given (services)
+  // -------------------------------------------------------------------------
+
+  const serviceStats = useMemo(() => {
+    const rows = services === "missing" ? [] : services;
+    const summarize = (list: ServiceRow[]) => {
+      const value = list.reduce((sum, x) => sum + (Number(x.value) || 0), 0);
+      const people = new Set(list.map((x) => x.person_id)).size;
+      return { count: list.length, people, value, perPerson: people ? value / people : 0 };
+    };
+    const current = rows.filter((x) => inPeriod(x.date));
+    const prev = previous ? rows.filter((x) => inPrevious(x.date)) : null;
+    return {
+      ...summarize(current),
+      prev: prev ? summarize(prev) : null,
+      byType: sumBy(current, (x) => x.service_type.trim(), () => 1),
+      valueByType: sumBy(current.filter((x) => Number(x.value) > 0), (x) => x.service_type.trim(), (x) => Number(x.value) || 0),
+      series: buildTimeSeries(current.map((x) => ({ date: x.date, value: 1 })), granularity, chartRange),
+      newestFirst: [...current].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0)),
+    };
+  }, [services, inPeriod, inPrevious, previous, granularity, chartRange]);
+
+  // -------------------------------------------------------------------------
   // Inventory (current snapshot; the period doesn't apply)
   // -------------------------------------------------------------------------
 
@@ -611,6 +664,21 @@ export default function ReportsPage() {
         lines.push(`Goal "${g.name}": ${formatCurrency(g.raised)} of ${formatCurrency(g.target_amount)} raised (${Math.round((g.raised / g.target_amount) * 100)}%), ${goalTiming(g).toLowerCase()}.`);
       }
     }
+    if ((reportType === "impact" || reportType === "services") && services !== "missing") {
+      const sv = serviceStats;
+      if (sv.count) {
+        lines.push(
+          `${periodIntro}, ${formatCount(sv.people)} ${sv.people === 1 ? "person was" : "people were"} helped ${formatCount(sv.count)} ${sv.count === 1 ? "time" : "times"}${
+            sv.value ? `, worth ${formatCurrency(sv.value)} in total` : ""
+          }${changeWords(sv.count, sv.prev?.count)}.`,
+        );
+        if (reportType === "services" && sv.byType.length) {
+          lines.push(`Most common: ${sv.byType.slice(0, 3).map((t) => `${t.name} (${formatCount(t.value)})`).join(", ")}.`);
+        }
+      } else if (reportType === "services") {
+        lines.push(`${periodIntro}, no help was recorded.`);
+      }
+    }
     if (reportType === "impact" || reportType === "outcomes") {
       for (const o of outcomes.filter((x) => x.people_with_followup > 0).slice(0, reportType === "impact" ? 2 : 6)) {
         lines.push(
@@ -651,7 +719,8 @@ export default function ReportsPage() {
       (reportType === "volunteers" && periodHours.length > 0) ||
       (reportType === "inventory" && inventory.length > 0) ||
       (reportType === "forms" && (selectedForm ? filteredSubmissions.length > 0 : forms.length > 0)) ||
-      (reportType === "outcomes" && outcomes.length > 0));
+      (reportType === "outcomes" && outcomes.length > 0) ||
+      (reportType === "services" && serviceStats.count > 0));
 
   const exportCSV = () => {
     if (!canExport) return;
@@ -753,6 +822,12 @@ export default function ReportsPage() {
           o.worse,
           improvedPercent(o) ?? "",
         ]),
+      ];
+    }
+    if (reportType === "services") {
+      rows = [
+        ["Date", "Person", "Help given", "Value", "Quantity from inventory"],
+        ...serviceStats.newestFirst.map((x) => [x.date, serviceName(x), x.service_type, x.value == null ? "" : Number(x.value).toFixed(2), x.quantity ?? ""]),
       ];
     }
     const label = reportType === "forms" && selectedForm ? `form ${selectedForm.title}` : reportType;
@@ -959,6 +1034,21 @@ export default function ReportsPage() {
           ]),
         ) +
         pdfNote("Includes people with a check-in in this period, comparing their first check-in ever with their latest.");
+    }
+    if (reportType === "services") {
+      const sv = serviceStats;
+      body =
+        pdfStats([
+          stat("Times help was given", formatCount(sv.count), sv.count, sv.prev?.count),
+          stat("People helped", formatCount(sv.people), sv.people, sv.prev?.people),
+          stat("Value of help", formatCurrency(sv.value), sv.value, sv.prev?.value),
+          stat("Value per person", formatCurrency(sv.perPerson), sv.perPerson, sv.prev?.perPerson),
+        ]) +
+        pdfHeading("By type") +
+        pdfTable(
+          ["Help given", "Times", "Value"],
+          sv.byType.map((t) => [t.name, t.value, formatCurrency(sv.valueByType.find((v) => v.name === t.name)?.value ?? 0)]),
+        );
     }
     const title = reportType === "forms" && selectedForm ? `${selectedForm.title}: Responses` : tabInfo.title;
     const periodLine =
@@ -1413,6 +1503,92 @@ export default function ReportsPage() {
             )}
           </>
         )}
+
+        {/* ============================== HELP GIVEN ============================ */}
+        {reportType === "services" &&
+          (services === "missing" ? (
+            <Card className="p-6">
+              <p className="text-sm text-muted-foreground">
+                Recording help needs a database update: run <code className="font-mono text-xs">012_services_and_case_notes.sql</code> in the
+                Supabase SQL Editor, then refresh.
+              </p>
+            </Card>
+          ) : (
+            <>
+              <StatGrid
+                compareLabel={compareLabel}
+                stats={[
+                  { label: "Times help was given", value: formatCount(serviceStats.count), change: percentChange(serviceStats.count, serviceStats.prev?.count) },
+                  { label: "People helped", value: formatCount(serviceStats.people), icon: Users, change: percentChange(serviceStats.people, serviceStats.prev?.people) },
+                  { label: "Value of help", value: formatCurrency(serviceStats.value), change: percentChange(serviceStats.value, serviceStats.prev?.value) },
+                  { label: "Value per person", value: serviceStats.people ? formatCurrency(serviceStats.perPerson) : "-", change: percentChange(serviceStats.perPerson, serviceStats.prev?.perPerson) },
+                ]}
+              />
+              {serviceStats.count === 0 ? (
+                <Card className="p-6 text-sm text-muted-foreground">
+                  No help recorded in this period. Record help from a person's page on{" "}
+                  <Link href="/people" className="text-primary underline underline-offset-4">
+                    People
+                  </Link>
+                  .
+                </Card>
+              ) : (
+                <>
+                  <div className="grid lg:grid-cols-3 gap-6">
+                    <ChartCard title="Help given over time" description={`Times per ${granularityLabel(granularity)}`} className="lg:col-span-2">
+                      <TimeSeriesChart data={serviceStats.series} kind="bar" color={COLORS[1]} seriesName="Times" />
+                    </ChartCard>
+                    <ChartCard title="By type">
+                      <DonutChart data={serviceStats.byType} valueFormatter={(x) => `${x} ${x === 1 ? "time" : "times"}`} heightClass="h-36" />
+                    </ChartCard>
+                  </div>
+                  {serviceStats.valueByType.length > 0 && (
+                    <ChartCard title="Value by type">
+                      <RankedBarChart
+                        seriesName="Value"
+                        valueFormatter={formatCurrency}
+                        data={serviceStats.valueByType.slice(0, 12).map((t) => ({ label: shorten(t.name, 18), fullName: t.name, value: t.value }))}
+                      />
+                    </ChartCard>
+                  )}
+                  <Card className="overflow-auto">
+                    <div className="p-4 border-b">
+                      <h3 className="font-semibold">All help given</h3>
+                    </div>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Date</TableHead>
+                          <TableHead>Person</TableHead>
+                          <TableHead>Help given</TableHead>
+                          <TableHead className="text-right">Value</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {serviceStats.newestFirst.slice(0, MAX_TABLE_ROWS).map((x) => (
+                          <TableRow key={x.id}>
+                            <TableCell className="whitespace-nowrap">{formatDate(x.date)}</TableCell>
+                            <TableCell>
+                              <Link href={`/people/${x.person_id}`} className="hover:underline">
+                                {serviceName(x) || "-"}
+                              </Link>
+                            </TableCell>
+                            <TableCell>{x.service_type}</TableCell>
+                            <TableCell className="text-right whitespace-nowrap">{x.value == null ? "-" : formatCurrency(Number(x.value))}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                    {serviceStats.count > MAX_TABLE_ROWS && (
+                      <p className="p-3 text-xs text-muted-foreground text-center border-t">
+                        Showing the latest {MAX_TABLE_ROWS} of {formatCount(serviceStats.count)}. Export CSV for the full list.
+                      </p>
+                    )}
+                  </Card>
+                </>
+              )}
+            </>
+          ))}
 
         {/* =============================== OUTCOMES ============================= */}
         {reportType === "outcomes" &&

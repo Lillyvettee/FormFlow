@@ -42,6 +42,8 @@ import { ShareFormDialog } from "@/components/share-form-dialog";
 import { FormTemplatePicker } from "@/components/form-template-picker";
 import type { FormTemplate } from "@/lib/form-templates";
 import { canBeOutcome } from "@/lib/outcomes";
+import { SHOW_IF_OPERATORS, canControl, type ShowIf, type ShowIfOperator } from "@/lib/form-logic";
+import { FormNotificationsEditor, notificationErrors, parseEmails, type NotificationsDraft } from "@/components/form-notifications-editor";
 import { Link } from "wouter";
 import {
   Plus,
@@ -66,6 +68,7 @@ import {
   List,
   CheckSquare,
   TrendingUp,
+  GitBranch,
   type LucideIcon,
 } from "lucide-react";
 import type { Form, FormField } from "@/types/database";
@@ -84,6 +87,13 @@ interface FormSettings {
   followUpFormId?: string | null;
   /** Background color, accent color and logo; see lib/form-appearance.ts. */
   theme?: { backgroundColor?: string; primaryColor?: string; logoUrl?: string };
+  /** Emails for each response; sent by supabase/functions/form-notify. */
+  notifications?: {
+    staffEmails?: string[];
+    confirmEmailFieldId?: string | null;
+    confirmMessage?: string | null;
+    includeAnswers?: boolean;
+  };
   [key: string]: unknown;
 }
 
@@ -148,6 +158,18 @@ const getFields = (form?: Form | null): FormField[] => (form?.fields as FormFiel
 const parseOptions = (text: string): string[] =>
   Array.from(new Set(text.split(",").map((s) => s.trim()).filter(Boolean)));
 
+/** The form's saved email settings as editable values. */
+const getNotificationsDraft = (form?: Form | null): NotificationsDraft => {
+  const n = getSettings(form).notifications ?? {};
+  return {
+    staffEmails: (n.staffEmails ?? []).join(", "),
+    confirm: Boolean(n.confirmEmailFieldId),
+    confirmEmailFieldId: n.confirmEmailFieldId ?? "",
+    confirmMessage: n.confirmMessage ?? "",
+    includeAnswers: n.includeAnswers ?? true,
+  };
+};
+
 /** The form's saved look as editable text ("" = use the organization's branding). */
 const getAppearanceDraft = (form?: Form | null): AppearanceDraft => {
   const theme = getSettings(form).theme ?? {};
@@ -202,6 +224,96 @@ function OptionsInput({
 }
 
 // ===========================================================================
+// ShowIfEditor
+// ===========================================================================
+
+const ANY_VALUE = "__any__";
+
+/**
+ * "Only show this question if [earlier question] [is] [answer]" for one
+ * field. Answers to choose from come from the earlier question: its dropdown
+ * options, Yes/No, or typed text. See lib/form-logic.ts.
+ */
+function ShowIfEditor({
+  field,
+  earlier,
+  onChange,
+}: {
+  field: FormField;
+  earlier: FormField[];
+  onChange: (showIf: ShowIf | undefined) => void;
+}) {
+  const rule = field.showIf;
+  const controller = earlier.find((f) => f.id === rule?.fieldId);
+  const op = SHOW_IF_OPERATORS.find((o) => o.value === rule?.op) ?? SHOW_IF_OPERATORS[0];
+  const choices = controller?.type === "checkbox" ? ["Yes", "No"] : controller?.type === "select" ? controller.options ?? [] : null;
+  const set = (patch: Partial<ShowIf>) => onChange({ fieldId: rule?.fieldId ?? "", op: rule?.op ?? "is", value: rule?.value, ...patch });
+
+  return (
+    <div className="mt-3 ml-9 rounded-md border border-dashed p-3 space-y-2">
+      <div className="flex items-center gap-2">
+        <Switch
+          id={`field-showif-${field.id}`}
+          checked={Boolean(rule)}
+          onCheckedChange={(on) => onChange(on ? { fieldId: earlier[earlier.length - 1].id, op: "is", value: "" } : undefined)}
+        />
+        <Label htmlFor={`field-showif-${field.id}`} className="text-xs flex items-center gap-1.5">
+          <GitBranch className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
+          Only show this question if...
+        </Label>
+      </div>
+      {rule && (
+        <div className="grid gap-2 sm:grid-cols-3">
+          <Select value={controller ? controller.id : ANY_VALUE} onValueChange={(v) => set({ fieldId: v, value: "" })}>
+            <SelectTrigger className="h-8 text-xs" aria-label="Question it depends on">
+              <SelectValue placeholder="Choose a question" />
+            </SelectTrigger>
+            <SelectContent>
+              {!controller && <SelectItem value={ANY_VALUE}>Choose a question</SelectItem>}
+              {earlier.map((f) => (
+                <SelectItem key={f.id} value={f.id}>
+                  {f.label || "Untitled question"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={op.value} onValueChange={(v) => set({ op: v as ShowIfOperator })}>
+            <SelectTrigger className="h-8 text-xs" aria-label="Condition">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SHOW_IF_OPERATORS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {op.needsValue &&
+            (choices ? (
+              <Select value={rule.value || ANY_VALUE} onValueChange={(v) => set({ value: v === ANY_VALUE ? "" : v })}>
+                <SelectTrigger className="h-8 text-xs" aria-label="Answer">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ANY_VALUE}>Choose an answer</SelectItem>
+                  {choices.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input className="h-8 text-xs" value={rule.value ?? ""} onChange={(e) => set({ value: e.target.value })} placeholder="Answer" aria-label="Answer" maxLength={200} />
+            ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ===========================================================================
 // FormBuilder
 // ===========================================================================
 
@@ -245,6 +357,7 @@ function FormBuilder({
     isPublished: form?.is_published ?? false,
     followUpFormId: getSettings(form).followUpFormId ?? "",
     appearance: getAppearanceDraft(form),
+    notifications: getNotificationsDraft(form),
   }));
 
   // ----- Form state -----
@@ -254,6 +367,7 @@ function FormBuilder({
   const [isPublished, setIsPublished] = useState(initial.isPublished);
   const [followUpFormId, setFollowUpFormId] = useState<string>(initial.followUpFormId);
   const [appearance, setAppearance] = useState<AppearanceDraft>(initial.appearance);
+  const [notifications, setNotifications] = useState<NotificationsDraft>(initial.notifications);
   const [isSaving, setIsSaving] = useState(false);
 
   /** Validation messages are hidden until the user first tries to save. */
@@ -261,7 +375,7 @@ function FormBuilder({
 
   const [initialSnapshot] = useState(() => JSON.stringify(initial));
   const isDirty =
-    JSON.stringify({ title, description, fields, isPublished, followUpFormId, appearance }) !== initialSnapshot;
+    JSON.stringify({ title, description, fields, isPublished, followUpFormId, appearance, notifications }) !== initialSnapshot;
 
   // Start at the top of the page when the builder opens.
   useEffect(() => {
@@ -301,7 +415,13 @@ function FormBuilder({
     });
   };
 
-  const removeField = (index: number) => setFields((prev) => prev.filter((_, i) => i !== index));
+  const removeField = (index: number) =>
+    setFields((prev) => {
+      const removedId = prev[index]?.id;
+      return prev
+        .filter((_, i) => i !== index)
+        .map((f) => (f.showIf?.fieldId === removedId ? { ...f, showIf: undefined } : f));
+    });
 
   /**
    * Move a field up (-1) or down (+1).
@@ -355,15 +475,24 @@ function FormBuilder({
   // -------------------------------------------------------------------------
 
   /** One message (or null) per field, in the same order as `fields`. */
-  const fieldErrors = fields.map((f) => {
+  const fieldErrors = fields.map((f, i) => {
     if (!f.label.trim()) return "Add a label for this field.";
     if (f.type === "select" && (f.options?.length ?? 0) === 0) return "Add at least one option.";
+    if (f.showIf) {
+      const controllerIndex = fields.findIndex((c) => c.id === f.showIf?.fieldId);
+      const needsValue = SHOW_IF_OPERATORS.find((o) => o.value === f.showIf?.op)?.needsValue;
+      if (controllerIndex < 0) return "Choose which question this depends on, or turn off the condition.";
+      if (controllerIndex >= i) return "This question can only depend on a question above it. Move it lower, or change the condition.";
+      if (needsValue && !f.showIf.value?.trim()) return "Choose the answer that shows this question.";
+    }
     return null;
   });
+  const emailFields = fields.filter((f) => f.type === "email");
+  const notifyErrors = notificationErrors(notifications, emailFields);
 
   const titleError = !title.trim() ? "Give your form a name." : null;
   const publishError = isPublished && fields.length === 0 ? "Add at least one field before publishing." : null;
-  const hasErrors = Boolean(titleError || publishError || fieldErrors.some(Boolean) || appearanceErrors(appearance));
+  const hasErrors = Boolean(titleError || publishError || fieldErrors.some(Boolean) || appearanceErrors(appearance) || notifyErrors);
 
   // -------------------------------------------------------------------------
   // Save / cancel
@@ -399,11 +528,23 @@ function FormBuilder({
       // Spread existing settings first so unrelated keys are preserved.
       // Only colors and logo that are set are saved; the rest fall back to the organization's branding.
       const theme = Object.fromEntries(Object.entries(appearance).filter(([, v]) => v)) as FormSettings["theme"];
-      const { theme: _oldTheme, ...otherSettings } = getSettings(form);
+      const { theme: _oldTheme, notifications: _oldNotifications, ...otherSettings } = getSettings(form);
+      const staffEmails = parseEmails(notifications.staffEmails);
+      const confirmEmailFieldId = notifications.confirm ? notifications.confirmEmailFieldId : null;
       const settings: FormSettings = {
         ...otherSettings,
         followUpFormId: followUpFormId || null,
         ...(theme && Object.keys(theme).length ? { theme } : {}),
+        ...(staffEmails.length || confirmEmailFieldId
+          ? {
+              notifications: {
+                staffEmails,
+                confirmEmailFieldId,
+                confirmMessage: notifications.confirmMessage.trim() || null,
+                includeAnswers: notifications.includeAnswers,
+              },
+            }
+          : {}),
       };
 
       const payload = {
@@ -493,6 +634,9 @@ function FormBuilder({
 
       {/* ===== Colors and logo ===== */}
       <FormAppearanceEditor value={appearance} onChange={setAppearance} userId={userId} />
+
+      {/* ===== Emails for each response ===== */}
+      <FormNotificationsEditor value={notifications} onChange={setNotifications} fields={fields} showErrors={showErrors} />
 
       {/* ===== Follow-up form connection ===== */}
       <div className="space-y-2 p-4 border rounded-md bg-muted/30">
@@ -721,6 +865,15 @@ function FormBuilder({
                     </div>
                   )}
 
+                  {/* Conditional question: only show when an earlier answer matches. */}
+                  {index > 0 && fields.slice(0, index).some(canControl) && (
+                    <ShowIfEditor
+                      field={field}
+                      earlier={fields.slice(0, index).filter(canControl)}
+                      onChange={(showIf) => updateField(index, { showIf })}
+                    />
+                  )}
+
                   {/* Explanatory notes for media fields */}
                   {field.type === "image" && (
                     <div className="mt-3 ml-9 flex items-center gap-2 text-xs text-muted-foreground">
@@ -852,11 +1005,22 @@ export default function FormsPage() {
 
     setDuplicatingId(form.id);
     try {
+      // New field ids, with conditions and the confirmation question pointed at the copies.
+      const newIds = new Map(getFields(form).map((f) => [f.id, generateId()]));
+      const settings = getSettings(form);
+      const confirmId = settings.notifications?.confirmEmailFieldId;
       const { error } = await supabase.from("forms").insert({
         title: `${form.title} (Copy)`,
         description: form.description,
-        fields: getFields(form).map((f) => ({ ...f, id: generateId() })),
-        settings: getSettings(form),
+        fields: getFields(form).map((f) => ({
+          ...f,
+          id: newIds.get(f.id)!,
+          ...(f.showIf ? { showIf: { ...f.showIf, fieldId: newIds.get(f.showIf.fieldId) ?? f.showIf.fieldId } } : {}),
+        })),
+        settings: {
+          ...settings,
+          ...(settings.notifications ? { notifications: { ...settings.notifications, confirmEmailFieldId: confirmId ? newIds.get(confirmId) ?? null : null } } : {}),
+        },
         is_published: false,
         user_id: user.id,
       });

@@ -8,7 +8,7 @@
 //                    to customers (see hasCustomerSender).
 // ============================================================
 
-import { requireEnv } from "./billing.ts";
+import { requireEnv } from "./env.ts";
 
 /** Resend's shared test sender. It can only deliver to the Resend account's own address. */
 const TEST_SENDER = "HumMotion <onboarding@resend.dev>";
