@@ -41,6 +41,7 @@ import { FormAppearanceEditor, appearanceErrors, type AppearanceDraft } from "@/
 import { ShareFormDialog } from "@/components/share-form-dialog";
 import { FormTemplatePicker } from "@/components/form-template-picker";
 import type { FormTemplate } from "@/lib/form-templates";
+import { canBeOutcome } from "@/lib/outcomes";
 import { Link } from "wouter";
 import {
   Plus,
@@ -64,6 +65,7 @@ import {
   Calendar,
   List,
   CheckSquare,
+  TrendingUp,
   type LucideIcon,
 } from "lucide-react";
 import type { Form, FormField } from "@/types/database";
@@ -292,7 +294,11 @@ function FormBuilder({
    * could make a form impossible to submit.
    */
   const changeFieldType = (index: number, type: FormField["type"]) => {
-    updateField(index, { type, ...(MEDIA_TYPES.has(type) ? { required: false } : {}) });
+    updateField(index, {
+      type,
+      ...(MEDIA_TYPES.has(type) ? { required: false } : {}),
+      ...(canBeOutcome({ type }) ? {} : { outcome: undefined }),
+    });
   };
 
   const removeField = (index: number) => setFields((prev) => prev.filter((_, i) => i !== index));
@@ -666,6 +672,52 @@ function FormBuilder({
                         onChange={(options) => updateField(index, { options })}
                         testId={`input-field-options-${index}`}
                       />
+                    </div>
+                  )}
+
+                  {/* Outcome tracking: compare each person's first and latest answer (migration 010). */}
+                  {canBeOutcome(field) && (
+                    <div className="mt-3 ml-9 rounded-md border border-dashed p-3 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          id={`field-outcome-${field.id}`}
+                          checked={Boolean(field.outcome)}
+                          onCheckedChange={(on) => updateField(index, { outcome: on ? { betterWhen: "higher" } : undefined })}
+                        />
+                        <Label htmlFor={`field-outcome-${field.id}`} className="text-xs flex items-center gap-1.5">
+                          <TrendingUp className="h-3.5 w-3.5 text-primary" aria-hidden="true" />
+                          Track as an outcome
+                        </Label>
+                      </div>
+                      {field.outcome ? (
+                        <div className="space-y-1">
+                          <Select
+                            value={field.outcome.betterWhen}
+                            onValueChange={(v) => updateField(index, { outcome: { betterWhen: v as "higher" | "lower" } })}
+                          >
+                            <SelectTrigger className="h-8 text-xs w-full sm:w-72" aria-label={`Which answers are better for ${fieldName}`}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="higher">
+                                {field.type === "select" ? "Options lower in the list are better" : "Higher numbers are better"}
+                              </SelectItem>
+                              <SelectItem value="lower">
+                                {field.type === "select" ? "Options higher in the list are better" : "Lower numbers are better"}
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-muted-foreground">
+                            Reports compare each person's first and latest answer. Send people their personal link from
+                            the People page so their answers connect over time.
+                            {field.type === "select" && " List the options in order, e.g. Never, Sometimes, Often, Always."}
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          Measure change in the people you serve, e.g. confidence or stability, from check-in to check-in.
+                        </p>
+                      )}
                     </div>
                   )}
 

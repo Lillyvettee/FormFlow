@@ -138,6 +138,12 @@ export interface FormField {
     pattern?: string
   }
   helpText?: string
+  /**
+   * Marks a number or dropdown question as an outcome, compared between each
+   * person's first and latest check-in (migration 010). Dropdown answers score
+   * by position: the first option is 1.
+   */
+  outcome?: { betterWhen: 'higher' | 'lower' }
 }
 
 export interface FormSettings {
@@ -174,6 +180,24 @@ export interface FormSubmission {
   respondent_email: string | null
   ip_address: string | null
   submitted_at: string
+  /** The person this response came from, via their personal link (migration 010). */
+  person_id?: string | null
+}
+
+/** Someone the organization serves (migration 010). */
+export interface Person {
+  id: string
+  organization_id: string
+  full_name: string
+  email: string | null
+  phone: string | null
+  program: string | null
+  status: 'active' | 'completed' | 'inactive'
+  start_date: string
+  notes: string | null
+  /** Secret part of their personal form links; changing it turns old links off. */
+  access_token: string
+  created_at: string
 }
 
 export interface Link {

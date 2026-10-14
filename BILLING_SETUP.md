@@ -23,6 +23,7 @@ In the Supabase dashboard, open **SQL Editor** and run each file, in order:
 4. `supabase/migrations/007_account_deletion.sql` (keeps a team's records when a member deletes their account)
 5. `supabase/migrations/008_sample_data.sql` (the dashboard's "Load sample data" button; removes the old guest demo and its codes)
 6. `supabase/migrations/009_fundraising_goals.sql` (fundraising goals with progress bars on the Reports page)
+7. `supabase/migrations/010_people_outcomes_funder_portals.sql` (People, outcome tracking and funder portals)
 
 `005_trial_reminders.sql` comes later, in step 6.
 

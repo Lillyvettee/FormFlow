@@ -8,6 +8,7 @@
  *   Full-page routes (work whether or not you're signed in):
  *     /invite/:token     accept a team invitation
  *     /forms/:id/embed   a form inside an <iframe> on another website
+ *     /share/:token      a funder portal: live, read-only report (no sign-in)
  *     /login, /signup    shown to signed-out visitors;
  *                        signed-in users are sent to the dashboard instead
  *     /forgot-password
@@ -46,6 +47,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import NotFound from "@/pages/not-found";
 import LandingPage from "@/pages/landing";
 import DashboardPage from "@/pages/dashboard";
+import PeoplePage, { PersonPage } from "@/pages/people";
+import FunderReportPage from "@/pages/funder-report";
 import FormsPage from "@/pages/forms";
 import ReportsPage from "@/pages/reports";
 import LinksPage from "@/pages/links-page";
@@ -83,6 +86,8 @@ function AuthenticatedRouter() {
       <Route path="/media" component={MediaPage} />
       <Route path="/donations" component={DonationsPage} />
       <Route path="/volunteer-hours" component={VolunteerHoursPage} />
+      <Route path="/people" component={PeoplePage} />
+      <Route path="/people/:id" component={PersonPage} />
       <Route path="/team" component={TeamPage} />
       <Route path="/settings" component={SettingsPage} />
       <Route path="/feedback" component={FeedbackPage} />
@@ -176,6 +181,7 @@ function AppContent() {
     <Switch>
       {/* Full-page routes that work for everyone. */}
       <Route path="/invite/:token" component={AcceptInvitePage} />
+      <Route path="/share/:token" component={FunderReportPage} />
       <Route path="/forms/:id/embed">
         <SubmitFormPage embed />
       </Route>

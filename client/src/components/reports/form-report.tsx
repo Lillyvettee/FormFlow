@@ -311,22 +311,25 @@ function DateSummary({ field, subs }: { field: FormField; subs: FormSubmission[]
 }
 
 /** Every answer in one response, with photos and recordings shown inline. */
-function ResponseDialog({
+export function ResponseDialog({
   fields,
   sub,
   index,
+  title,
   onClose,
 }: {
   fields: FormField[];
   sub: FormSubmission;
-  index: number;
+  index?: number;
+  /** Defaults to "Response #<index>". */
+  title?: string;
   onClose: () => void;
 }) {
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Response #{index}</DialogTitle>
+          <DialogTitle>{title ?? `Response #${index}`}</DialogTitle>
           <DialogDescription>{sub.submitted_at ? new Date(sub.submitted_at).toLocaleString("en-US") : ""}</DialogDescription>
         </DialogHeader>
         <dl className="space-y-4">

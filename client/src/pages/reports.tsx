@@ -11,6 +11,10 @@
  *   - Volunteer hours   hours, top volunteers, activities, every session
  *   - Inventory         current stock, categories, restock list
  *   - Form responses    every form at a glance, or one form question by question
+ *   - Outcomes          how the people you serve change between check-ins
+ *
+ * Funder portals: the "Funder portals" button manages private links to a
+ * live, read-only report for funders (components/reports/funder-shares-dialog).
  *
  * Period: one shared filter (This month, Last 30 days, custom dates, ...)
  * for everything except inventory, which is always current. Every number is
@@ -40,6 +44,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
+  Activity,
   AlertTriangle,
   CalendarRange,
   Clock,
@@ -50,6 +55,7 @@ import {
   Info,
   Package,
   Search,
+  Share2,
   TrendingUp,
   Users,
   X,
@@ -107,13 +113,16 @@ import { openPrintableReport, pdfHeading, pdfNote, pdfProgress, pdfStats, pdfTab
 import { ChartCard, COLORS, DANGER_COLOR, DonutChart, EmptyChart, RankedBarChart, StatGrid, TimeSeriesChart } from "@/components/reports/report-ui";
 import { GoalsCard, goalTiming, useGoals } from "@/components/reports/goals-card";
 import { FormReport, FormsOverview, MAX_TABLE_ROWS, fieldsOf } from "@/components/reports/form-report";
+import { OutcomesReport } from "@/components/reports/outcomes-report";
+import { FunderSharesDialog } from "@/components/reports/funder-shares-dialog";
+import { fetchOutcomes, formatScore, improvedPercent, type OutcomeResult } from "@/lib/outcomes";
 import type { Form, FormSubmission } from "@/types/database";
 
 // ===========================================================================
 // Constants
 // ===========================================================================
 
-type ReportType = "impact" | "donations" | "volunteers" | "inventory" | "forms";
+type ReportType = "impact" | "donations" | "volunteers" | "inventory" | "forms" | "outcomes";
 
 const REPORT_TYPES: { value: ReportType; label: string; title: string; icon: LucideIcon }[] = [
   { value: "impact", label: "Impact overview", title: "Impact Report", icon: TrendingUp },
@@ -121,6 +130,7 @@ const REPORT_TYPES: { value: ReportType; label: string; title: string; icon: Luc
   { value: "volunteers", label: "Volunteer hours", title: "Volunteer Report", icon: Clock },
   { value: "inventory", label: "Inventory", title: "Inventory Report", icon: Package },
   { value: "forms", label: "Form responses", title: "Form Responses Report", icon: FileText },
+  { value: "outcomes", label: "Outcomes", title: "Outcomes Report", icon: Activity },
 ];
 
 const PERIOD_PRESETS: { value: Exclude<PeriodPreset, "custom">; label: string }[] = [
@@ -221,6 +231,29 @@ export default function ReportsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const goals = useGoals();
+  const [showFunderPortals, setShowFunderPortals] = useState(false);
+
+  /** Outcome results for the period (migration 010), worked out by the database. */
+  const [outcomes, setOutcomes] = useState<OutcomeResult[]>([]);
+  const [outcomesState, setOutcomesState] = useState<"loading" | "ready" | "missing" | "error">("loading");
+  useEffect(() => {
+    if (!user || periodError) return;
+    let cancelled = false;
+    fetchOutcomes(dateFrom, dateTo)
+      .then((rows) => {
+        if (cancelled) return;
+        setOutcomes(rows);
+        setOutcomesState("ready");
+      })
+      .catch((err: { code?: string }) => {
+        if (cancelled) return;
+        setOutcomes([]);
+        setOutcomesState(["PGRST202", "42883", "PGRST205"].includes(err?.code ?? "") ? "missing" : "error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user, dateFrom, dateTo, periodError]);
 
   /** Forms and inventory don't depend on the period. Sample records are left out. */
   useEffect(() => {
@@ -578,6 +611,14 @@ export default function ReportsPage() {
         lines.push(`Goal "${g.name}": ${formatCurrency(g.raised)} of ${formatCurrency(g.target_amount)} raised (${Math.round((g.raised / g.target_amount) * 100)}%), ${goalTiming(g).toLowerCase()}.`);
       }
     }
+    if (reportType === "impact" || reportType === "outcomes") {
+      for (const o of outcomes.filter((x) => x.people_with_followup > 0).slice(0, reportType === "impact" ? 2 : 6)) {
+        lines.push(
+          `"${o.label}": of ${formatCount(o.people_with_followup)} ${o.people_with_followup === 1 ? "person" : "people"} measured more than once, ${improvedPercent(o)}% improved (average ${formatScore(o, o.average_first)} at first, ${formatScore(o, o.average_latest)} at the latest check-in).`,
+        );
+      }
+      if (reportType === "outcomes" && !lines.length) lines.push("No one has been measured more than once yet in this period.");
+    }
     if (reportType === "inventory") {
       lines.push(
         `${formatCount(inventoryStats.total)} items are tracked across ${formatCount(inventoryStats.byCategory.length)} ${
@@ -609,7 +650,8 @@ export default function ReportsPage() {
       (reportType === "donations" && periodDonations.length > 0) ||
       (reportType === "volunteers" && periodHours.length > 0) ||
       (reportType === "inventory" && inventory.length > 0) ||
-      (reportType === "forms" && (selectedForm ? filteredSubmissions.length > 0 : forms.length > 0)));
+      (reportType === "forms" && (selectedForm ? filteredSubmissions.length > 0 : forms.length > 0)) ||
+      (reportType === "outcomes" && outcomes.length > 0));
 
   const exportCSV = () => {
     if (!canExport) return;
@@ -692,6 +734,26 @@ export default function ReportsPage() {
           ];
         }
         break;
+    }
+    if (reportType === "outcomes") {
+      rows = [
+        ["Report period", periodLabel],
+        [],
+        ["Question", "Form", "Better when", "People measured", "Measured more than once", "Average first", "Average latest", "Improved", "No change", "Declined", "Improved %"],
+        ...outcomes.map((o) => [
+          o.label,
+          o.form_title,
+          o.better_when,
+          o.people_measured,
+          o.people_with_followup,
+          o.average_first ?? "",
+          o.average_latest ?? "",
+          o.improved,
+          o.same,
+          o.worse,
+          improvedPercent(o) ?? "",
+        ]),
+      ];
     }
     const label = reportType === "forms" && selectedForm ? `form ${selectedForm.title}` : reportType;
     downloadCsv(exportFileName([orgName, label], "csv"), rows);
@@ -876,6 +938,28 @@ export default function ReportsPage() {
         break;
     }
 
+    if (reportType === "outcomes") {
+      body =
+        pdfStats([
+          { label: "Outcome questions", value: formatCount(outcomes.length) },
+          { label: "People measured", value: formatCount(Math.max(0, ...outcomes.map((o) => o.people_measured))) },
+          { label: "Measured more than once", value: formatCount(Math.max(0, ...outcomes.map((o) => o.people_with_followup))) },
+        ]) +
+        pdfHeading("Results by question") +
+        pdfTable(
+          ["Question", "Measured twice+", "Average first", "Average latest", "Improved", "No change", "Declined"],
+          outcomes.map((o) => [
+            `${o.label} (${o.form_title})`,
+            o.people_with_followup,
+            formatScore(o, o.average_first),
+            formatScore(o, o.average_latest),
+            o.people_with_followup ? `${o.improved} (${improvedPercent(o)}%)` : "-",
+            o.same,
+            o.worse,
+          ]),
+        ) +
+        pdfNote("Includes people with a check-in in this period, comparing their first check-in ever with their latest.");
+    }
     const title = reportType === "forms" && selectedForm ? `${selectedForm.title}: Responses` : tabInfo.title;
     const periodLine =
       reportType === "inventory"
@@ -939,7 +1023,10 @@ export default function ReportsPage() {
           <h1 className="text-2xl font-serif font-bold">Reports</h1>
           <p className="text-muted-foreground">Track your impact, and share it with your board, donors and funders</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={() => setShowFunderPortals(true)}>
+            <Share2 className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> Funder portals
+          </Button>
           <Button variant="outline" size="sm" onClick={exportCSV} disabled={!canExport}>
             <Download className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> CSV
           </Button>
@@ -1327,6 +1414,23 @@ export default function ReportsPage() {
           </>
         )}
 
+        {/* =============================== OUTCOMES ============================= */}
+        {reportType === "outcomes" &&
+          (outcomesState === "missing" ? (
+            <Card className="p-6">
+              <p className="text-sm text-muted-foreground">
+                Outcomes need a database update: run <code className="font-mono text-xs">010_people_outcomes_funder_portals.sql</code> in the
+                Supabase SQL Editor, then refresh.
+              </p>
+            </Card>
+          ) : outcomesState === "error" ? (
+            <EmptyChart message="Outcomes couldn't be loaded. Refresh to try again." />
+          ) : outcomesState === "loading" ? (
+            <Skeleton className="h-48 w-full" />
+          ) : (
+            <OutcomesReport outcomes={outcomes} />
+          ))}
+
         {/* ================================ FORMS =============================== */}
         {reportType === "forms" && (
           <>
@@ -1404,7 +1508,9 @@ export default function ReportsPage() {
         )}
       </div>
 
-      {chartRange && reportType !== "inventory" && (
+      {showFunderPortals && <FunderSharesDialog onClose={() => setShowFunderPortals(false)} />}
+
+      {chartRange && reportType !== "inventory" && reportType !== "outcomes" && (
         <p className="text-xs text-muted-foreground">
           Charts cover {formatCount(daysInRange(chartRange.from, chartRange.to))} days, grouped by {granularityLabel(granularity)}.
         </p>

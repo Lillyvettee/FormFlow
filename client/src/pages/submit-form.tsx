@@ -40,6 +40,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { setBrandColor } from "@/lib/brand-color";
 import { getAppearance, prefersDarkText, RESIZE_MESSAGE } from "@/lib/form-appearance";
+import { PERSON_LINK_PARAM } from "@/lib/outcomes";
 import {
   CheckCircle2,
   FileText,
@@ -538,6 +539,12 @@ export default function SubmitFormPage({ embed = false }: { embed?: boolean; par
 
   // ----- Data -----
   const [form, setForm] = useState<Form | null>(null);
+  /**
+   * From a personal link (?p=...), sent by the organization from the People
+   * page. The database uses it to attach this response to that person's
+   * record, and doesn't store it.
+   */
+  const [personToken] = useState(() => new URLSearchParams(window.location.search).get(PERSON_LINK_PARAM));
   /** The organization's name, logo and color (get_public_form_branding, migration 006). */
   const [branding, setBranding] = useState<{ organization_name: string; primary_color: string | null; logo_url: string | null } | null>(null);
   const [logoFailed, setLogoFailed] = useState(false);
@@ -571,7 +578,8 @@ export default function SubmitFormPage({ embed = false }: { embed?: boolean; par
     : undefined;
   const headerMuted = appearance.backgroundColor ? "opacity-80" : "text-muted-foreground";
   /** Follow-up forms open the same way this one did. */
-  const formPath = (id: string) => `/forms/${id}/${embed ? "embed" : "submit"}`;
+  const formPath = (id: string) =>
+    `/forms/${id}/${embed ? "embed" : "submit"}${personToken ? `?${PERSON_LINK_PARAM}=${encodeURIComponent(personToken)}` : ""}`;
 
   // -------------------------------------------------------------------------
   // Load the form
@@ -814,7 +822,7 @@ export default function SubmitFormPage({ embed = false }: { embed?: boolean; par
       // 3. Save the submission.
       const { error: insertError } = await supabase
         .from("form_submissions")
-        .insert({ form_id: form.id, data: { ...cleaned, ...fileUrls } });
+        .insert({ form_id: form.id, data: { ...cleaned, ...fileUrls }, ...(personToken ? { person_token: personToken } : {}) });
       if (insertError) throw new Error(insertError.message);
 
       setSubmitted(true);
