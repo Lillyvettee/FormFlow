@@ -7,6 +7,7 @@
  *
  *   Full-page routes (work whether or not you're signed in):
  *     /invite/:token     accept a team invitation
+ *     /forms/:id/embed   a form inside an <iframe> on another website
  *     /login, /signup    shown to signed-out visitors;
  *                        signed-in users are sent to the dashboard instead
  *     /forgot-password
@@ -175,6 +176,9 @@ function AppContent() {
     <Switch>
       {/* Full-page routes that work for everyone. */}
       <Route path="/invite/:token" component={AcceptInvitePage} />
+      <Route path="/forms/:id/embed">
+        <SubmitFormPage embed />
+      </Route>
       <Route path="/forgot-password" component={ForgotPasswordPage} />
       <Route path="/reset-password" component={ResetPasswordPage} />
       <Route path="/delete-account" component={DeleteAccountPage} />

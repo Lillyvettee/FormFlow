@@ -2,7 +2,12 @@
  * SubmitFormPage
  *
  * Public page where anyone with the link fills out a published form.
- * Route: /forms/:id/submit. No sign-in required.
+ * Routes: /forms/:id/submit (full page, for links) and /forms/:id/embed
+ * (compact, for an <iframe> on another website; see lib/form-appearance.ts).
+ * No sign-in required.
+ *
+ * Look: the form's own background color, accent color and logo
+ * (forms.settings.theme), falling back to the organization's branding.
  *
  * Flow:
  *   1. Load the form (only if it is published).
@@ -34,6 +39,7 @@ import { AppLogo } from "@/components/app-logo";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { setBrandColor } from "@/lib/brand-color";
+import { getAppearance, prefersDarkText, RESIZE_MESSAGE } from "@/lib/form-appearance";
 import {
   CheckCircle2,
   FileText,
@@ -471,10 +477,61 @@ function AudioRecordField({
 }
 
 // ===========================================================================
+// PageShell
+// ===========================================================================
+
+/**
+ * Outer wrapper for every state of the page (loading, not found, the form,
+ * thank you), painted in the form's background color.
+ *
+ * When embedded it skips the full-screen height and tells the website
+ * hosting the iframe how tall the content is, so the iframe can grow to fit.
+ */
+function PageShell({
+  embed,
+  backgroundColor,
+  centered,
+  children,
+}: {
+  embed: boolean;
+  backgroundColor: string | null;
+  centered?: boolean;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!embed || window.parent === window || !el) return;
+    const post = () =>
+      window.parent.postMessage({ type: RESIZE_MESSAGE, height: Math.ceil(el.getBoundingClientRect().height) }, "*");
+    const observer = new ResizeObserver(post);
+    observer.observe(el);
+    post();
+    return () => observer.disconnect();
+  }, [embed]);
+
+  return (
+    <div
+      ref={ref}
+      className={[
+        embed ? "p-3 sm:p-4" : "min-h-screen p-6",
+        backgroundColor ? "" : "bg-background",
+        centered ? "flex items-center justify-center" : "",
+      ].join(" ")}
+      style={backgroundColor ? { backgroundColor } : undefined}
+    >
+      {children}
+    </div>
+  );
+}
+
+// ===========================================================================
 // Page component
 // ===========================================================================
 
-export default function SubmitFormPage() {
+// params: what wouter passes when this is a Route component; the id is read with useParams instead.
+export default function SubmitFormPage({ embed = false }: { embed?: boolean; params?: unknown }) {
   const params = useParams<{ id: string }>();
   const formId = params.id;
   const { toast } = useToast();
@@ -506,6 +563,15 @@ export default function SubmitFormPage() {
 
   const fields = (form?.fields as FormField[] | null) ?? [];
   const followUpFormId = getFollowUpId(form);
+  const appearance = getAppearance(form);
+  const logoUrl = appearance.logoUrl ?? branding?.logo_url ?? null;
+  /** Text on a custom background (the title area) switches to dark or light to stay readable. */
+  const headerColor = appearance.backgroundColor
+    ? prefersDarkText(appearance.backgroundColor) ? "#171717" : "#fafafa"
+    : undefined;
+  const headerMuted = appearance.backgroundColor ? "opacity-80" : "text-muted-foreground";
+  /** Follow-up forms open the same way this one did. */
+  const formPath = (id: string) => `/forms/${id}/${embed ? "embed" : "submit"}`;
 
   // -------------------------------------------------------------------------
   // Load the form
@@ -552,25 +618,27 @@ export default function SubmitFormPage() {
   }, [formId]);
 
   /**
-   * Show the form in its organization's colors and logo. Branding is
-   * optional: if it can't load, the form still works in the default theme.
-   * The color is removed when leaving the page, restoring a signed-in
-   * member's own organization color.
+   * Show the form in its own accent color, or else its organization's colors
+   * and logo. Branding is optional: if it can't load, the form still works in
+   * the default theme. The color is removed when leaving the page, restoring
+   * a signed-in member's own organization color.
    */
   useEffect(() => {
     if (!form?.id) return;
     let cancelled = false;
+    const ownColor = getAppearance(form).primaryColor;
+    if (ownColor) setBrandColor("page", ownColor);
     supabase.rpc("get_public_form_branding", { p_form_id: form.id }).then(({ data }) => {
       const row = Array.isArray(data) ? data[0] : data;
       if (cancelled || !row) return;
       setBranding(row);
-      setBrandColor("page", row.primary_color);
+      if (!ownColor) setBrandColor("page", row.primary_color);
     });
     return () => {
       cancelled = true;
       setBrandColor("page", null);
     };
-  }, [form?.id]);
+  }, [form]);
 
   // Show the form's title in the browser tab.
   useEffect(() => {
@@ -608,7 +676,7 @@ export default function SubmitFormPage() {
   useEffect(() => {
     if (!submitted || !followUpFormId) return;
     if (followUpCountdown <= 0) {
-      window.location.href = `/forms/${followUpFormId}/submit`;
+      window.location.href = formPath(followUpFormId);
       return;
     }
     const timer = setTimeout(() => setFollowUpCountdown((s) => s - 1), 1000);
@@ -782,14 +850,14 @@ export default function SubmitFormPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-6" aria-busy="true">
-        <Card className="w-full max-w-xl p-8 space-y-4">
+      <PageShell embed={embed} backgroundColor={null} centered>
+        <Card className="w-full max-w-xl p-8 space-y-4" aria-busy="true">
           <Skeleton className="h-6 w-48" />
           <Skeleton className="h-4 w-64" />
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
         </Card>
-      </div>
+      </PageShell>
     );
   }
 
@@ -799,7 +867,7 @@ export default function SubmitFormPage() {
 
   if (notFound || !form) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+      <PageShell embed={embed} backgroundColor={null} centered>
         <Card className="w-full max-w-md p-8 text-center space-y-3">
           <FileText className="h-10 w-10 text-muted-foreground mx-auto" aria-hidden="true" />
           <h1 className="text-lg font-semibold">Form not found</h1>
@@ -808,7 +876,7 @@ export default function SubmitFormPage() {
             shared it.
           </p>
         </Card>
-      </div>
+      </PageShell>
     );
   }
 
@@ -818,7 +886,7 @@ export default function SubmitFormPage() {
 
   if (submitted) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+      <PageShell embed={embed} backgroundColor={appearance.backgroundColor} centered>
         <Card role="status" className="w-full max-w-md p-8 text-center space-y-4">
           <div className="h-14 w-14 rounded-full bg-chart-3/10 flex items-center justify-center mx-auto" aria-hidden="true">
             <CheckCircle2 className="h-7 w-7 text-chart-3" />
@@ -831,7 +899,7 @@ export default function SubmitFormPage() {
                 Taking you to the next form in {followUpCountdown} {followUpCountdown === 1 ? "second" : "seconds"}...
               </p>
               <Button asChild>
-                <a href={`/forms/${followUpFormId}/submit`}>
+                <a href={formPath(followUpFormId)}>
                   Continue now <ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />
                 </a>
               </Button>
@@ -842,7 +910,7 @@ export default function SubmitFormPage() {
             </Button>
           )}
         </Card>
-      </div>
+      </PageShell>
     );
   }
 
@@ -851,138 +919,62 @@ export default function SubmitFormPage() {
   // -------------------------------------------------------------------------
 
   return (
-    <div className="p-6 max-w-2xl mx-auto space-y-6 min-h-screen">
-      <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-        {branding?.logo_url && !logoFailed ? (
-          <img
-            src={branding.logo_url}
-            alt=""
-            className="h-8 w-8 rounded-md object-contain"
-            onError={() => setLogoFailed(true)}
-          />
-        ) : (
-          <AppLogo className="h-6 w-6" />
-        )}
-        <span>{branding?.organization_name || APP_NAME}</span>
-      </div>
+    <PageShell embed={embed} backgroundColor={appearance.backgroundColor}>
+      <div className="max-w-2xl mx-auto space-y-6">
+        <div className="space-y-6" style={headerColor ? { color: headerColor } : undefined}>
+          <div className={`flex items-center gap-2 text-sm mb-2 ${headerMuted}`}>
+            {logoUrl && !logoFailed ? (
+              <img
+                src={logoUrl}
+                alt=""
+                className="h-10 max-w-[160px] rounded-md object-contain"
+                onError={() => setLogoFailed(true)}
+              />
+            ) : (
+              <AppLogo className="h-6 w-6" />
+            )}
+            <span>{branding?.organization_name || APP_NAME}</span>
+          </div>
 
-      <div className="space-y-1">
-        <h1 className="text-2xl font-serif font-bold" data-testid="text-submit-form-title">
-          {form.title}
-        </h1>
-        {form.description && <p className="text-muted-foreground whitespace-pre-line">{form.description}</p>}
-        {fields.some((f) => f.required) && (
-          <p className="text-xs text-muted-foreground pt-1">
-            Fields marked <span className="text-destructive">*</span> are required.
-          </p>
-        )}
-      </div>
+          <div className="space-y-1">
+            <h1 className="text-2xl font-serif font-bold" data-testid="text-submit-form-title">
+              {form.title}
+            </h1>
+            {form.description && <p className={`whitespace-pre-line ${headerMuted}`}>{form.description}</p>}
+            {fields.some((f) => f.required) && (
+              <p className={`text-xs pt-1 ${headerMuted}`}>
+                Fields marked <span className="text-destructive">*</span> are required.
+              </p>
+            )}
+          </div>
+        </div>
 
-      <Card className="p-6">
-        {/* noValidate: we show our own inline errors instead of browser popups. */}
-        <form onSubmit={handleSubmit} className="space-y-5" noValidate>
-          {submitError && (
-            <div role="alert" className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 text-destructive text-sm">
-              <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" aria-hidden="true" />
-              <span>{submitError}</span>
-            </div>
-          )}
+        <Card className="p-6">
+          {/* noValidate: we show our own inline errors instead of browser popups. */}
+          <form onSubmit={handleSubmit} className="space-y-5" noValidate>
+            {submitError && (
+              <div role="alert" className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 text-destructive text-sm">
+                <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" aria-hidden="true" />
+                <span>{submitError}</span>
+              </div>
+            )}
 
-          {fields.length === 0 && <p className="text-sm text-muted-foreground">This form has no questions yet.</p>}
+            {fields.length === 0 && <p className="text-sm text-muted-foreground">This form has no questions yet.</p>}
 
-          {fields.map((field) => {
-            const inputId = `field-${field.id}`;
-            const error = fieldErrors[field.id];
-            const errorId = error ? `${inputId}-error` : undefined;
-            const helpId = field.helpText ? `${inputId}-help` : undefined;
-            const describedBy = [errorId, helpId].filter(Boolean).join(" ") || undefined;
-            const textValue = answers[field.id];
-            const placeholder = field.placeholder || undefined;
+            {fields.map((field) => {
+              const inputId = `field-${field.id}`;
+              const error = fieldErrors[field.id];
+              const errorId = error ? `${inputId}-error` : undefined;
+              const helpId = field.helpText ? `${inputId}-help` : undefined;
+              const describedBy = [errorId, helpId].filter(Boolean).join(" ") || undefined;
+              const textValue = answers[field.id];
+              const placeholder = field.placeholder || undefined;
 
-            return (
-              <div key={field.id} className="space-y-2">
-                {/* Checkbox fields put their label beside the box instead of above. */}
-                {field.type !== "checkbox" && (
-                  <Label htmlFor={inputId}>
-                    {field.label}
-                    {field.required && (
-                      <span className="text-destructive ml-0.5" aria-hidden="true">
-                        *
-                      </span>
-                    )}
-                  </Label>
-                )}
-
-                {(field.type === "text" || field.type === "email") && (
-                  <Input
-                    id={inputId}
-                    type={field.type === "email" ? "email" : "text"}
-                    inputMode={field.type === "email" ? "email" : undefined}
-                    autoComplete={field.type === "email" ? "email" : undefined}
-                    placeholder={placeholder}
-                    value={typeof textValue === "string" ? textValue : ""}
-                    onChange={(e) => updateAnswer(field.id, e.target.value)}
-                    maxLength={500}
-                    aria-required={field.required}
-                    aria-invalid={Boolean(error)}
-                    aria-describedby={describedBy}
-                  />
-                )}
-
-                {field.type === "textarea" && (
-                  <Textarea
-                    id={inputId}
-                    placeholder={placeholder}
-                    value={typeof textValue === "string" ? textValue : ""}
-                    onChange={(e) => updateAnswer(field.id, e.target.value)}
-                    maxLength={5000}
-                    aria-required={field.required}
-                    aria-invalid={Boolean(error)}
-                    aria-describedby={describedBy}
-                  />
-                )}
-
-                {/* Number kept as typed text while editing, so "1." or "-" mid-typing
-                    is not wiped out; converted to a number on save. */}
-                {field.type === "number" && (
-                  <Input
-                    id={inputId}
-                    type="number"
-                    inputMode="decimal"
-                    placeholder={placeholder ?? "0"}
-                    value={textValue === undefined ? "" : String(textValue)}
-                    onChange={(e) =>
-                      updateAnswer(field.id, e.target.value === "" ? "" : Number.isFinite(e.target.valueAsNumber) ? e.target.valueAsNumber : e.target.value)
-                    }
-                    aria-required={field.required}
-                    aria-invalid={Boolean(error)}
-                    aria-describedby={describedBy}
-                  />
-                )}
-
-                {field.type === "date" && (
-                  <Input
-                    id={inputId}
-                    type="date"
-                    value={typeof textValue === "string" ? textValue : ""}
-                    onChange={(e) => updateAnswer(field.id, e.target.value)}
-                    aria-required={field.required}
-                    aria-invalid={Boolean(error)}
-                    aria-describedby={describedBy}
-                  />
-                )}
-
-                {field.type === "checkbox" && (
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id={inputId}
-                      checked={answers[field.id] === true}
-                      onCheckedChange={(checked) => updateAnswer(field.id, checked === true)}
-                      aria-required={field.required}
-                      aria-invalid={Boolean(error)}
-                      aria-describedby={describedBy}
-                    />
-                    <Label htmlFor={inputId} className="text-sm cursor-pointer">
+              return (
+                <div key={field.id} className="space-y-2">
+                  {/* Checkbox fields put their label beside the box instead of above. */}
+                  {field.type !== "checkbox" && (
+                    <Label htmlFor={inputId}>
                       {field.label}
                       {field.required && (
                         <span className="text-destructive ml-0.5" aria-hidden="true">
@@ -990,94 +982,174 @@ export default function SubmitFormPage() {
                         </span>
                       )}
                     </Label>
-                  </div>
-                )}
+                  )}
 
-                {field.type === "select" && (
-                  <Select
-                    value={typeof textValue === "string" ? textValue : ""}
-                    onValueChange={(v) => updateAnswer(field.id, v)}
-                  >
-                    <SelectTrigger
+                  {(field.type === "text" || field.type === "email") && (
+                    <Input
                       id={inputId}
+                      type={field.type === "email" ? "email" : "text"}
+                      inputMode={field.type === "email" ? "email" : undefined}
+                      autoComplete={field.type === "email" ? "email" : undefined}
+                      placeholder={placeholder}
+                      value={typeof textValue === "string" ? textValue : ""}
+                      onChange={(e) => updateAnswer(field.id, e.target.value)}
+                      maxLength={500}
                       aria-required={field.required}
                       aria-invalid={Boolean(error)}
                       aria-describedby={describedBy}
-                      className={error ? "border-destructive" : ""}
+                    />
+                  )}
+
+                  {field.type === "textarea" && (
+                    <Textarea
+                      id={inputId}
+                      placeholder={placeholder}
+                      value={typeof textValue === "string" ? textValue : ""}
+                      onChange={(e) => updateAnswer(field.id, e.target.value)}
+                      maxLength={5000}
+                      aria-required={field.required}
+                      aria-invalid={Boolean(error)}
+                      aria-describedby={describedBy}
+                    />
+                  )}
+
+                  {/* Number kept as typed text while editing, so "1." or "-" mid-typing
+                      is not wiped out; converted to a number on save. */}
+                  {field.type === "number" && (
+                    <Input
+                      id={inputId}
+                      type="number"
+                      inputMode="decimal"
+                      placeholder={placeholder ?? "0"}
+                      value={textValue === undefined ? "" : String(textValue)}
+                      onChange={(e) =>
+                        updateAnswer(field.id, e.target.value === "" ? "" : Number.isFinite(e.target.valueAsNumber) ? e.target.valueAsNumber : e.target.value)
+                      }
+                      aria-required={field.required}
+                      aria-invalid={Boolean(error)}
+                      aria-describedby={describedBy}
+                    />
+                  )}
+
+                  {field.type === "date" && (
+                    <Input
+                      id={inputId}
+                      type="date"
+                      value={typeof textValue === "string" ? textValue : ""}
+                      onChange={(e) => updateAnswer(field.id, e.target.value)}
+                      aria-required={field.required}
+                      aria-invalid={Boolean(error)}
+                      aria-describedby={describedBy}
+                    />
+                  )}
+
+                  {field.type === "checkbox" && (
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id={inputId}
+                        checked={answers[field.id] === true}
+                        onCheckedChange={(checked) => updateAnswer(field.id, checked === true)}
+                        aria-required={field.required}
+                        aria-invalid={Boolean(error)}
+                        aria-describedby={describedBy}
+                      />
+                      <Label htmlFor={inputId} className="text-sm cursor-pointer">
+                        {field.label}
+                        {field.required && (
+                          <span className="text-destructive ml-0.5" aria-hidden="true">
+                            *
+                          </span>
+                        )}
+                      </Label>
+                    </div>
+                  )}
+
+                  {field.type === "select" && (
+                    <Select
+                      value={typeof textValue === "string" ? textValue : ""}
+                      onValueChange={(v) => updateAnswer(field.id, v)}
                     >
-                      <SelectValue placeholder="Select an option" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(field.options ?? []).map((opt) => (
-                        <SelectItem key={opt} value={opt}>
-                          {opt}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
+                      <SelectTrigger
+                        id={inputId}
+                        aria-required={field.required}
+                        aria-invalid={Boolean(error)}
+                        aria-describedby={describedBy}
+                        className={error ? "border-destructive" : ""}
+                      >
+                        <SelectValue placeholder="Select an option" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(field.options ?? []).map((opt) => (
+                          <SelectItem key={opt} value={opt}>
+                            {opt}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
 
-                {field.type === "image" && (
-                  <ImageUploadField
-                    fieldId={field.id}
-                    value={files[field.id] ?? null}
-                    onChange={(f) => updateFile(field.id, f)}
-                    invalid={Boolean(error)}
-                    describedBy={describedBy}
-                  />
-                )}
+                  {field.type === "image" && (
+                    <ImageUploadField
+                      fieldId={field.id}
+                      value={files[field.id] ?? null}
+                      onChange={(f) => updateFile(field.id, f)}
+                      invalid={Boolean(error)}
+                      describedBy={describedBy}
+                    />
+                  )}
 
-                {field.type === "audio" && (
-                  <AudioRecordField
-                    fieldId={field.id}
-                    value={files[field.id] ?? null}
-                    onChange={(f) => updateFile(field.id, f)}
-                    invalid={Boolean(error)}
-                    describedBy={describedBy}
-                  />
-                )}
+                  {field.type === "audio" && (
+                    <AudioRecordField
+                      fieldId={field.id}
+                      value={files[field.id] ?? null}
+                      onChange={(f) => updateFile(field.id, f)}
+                      invalid={Boolean(error)}
+                      describedBy={describedBy}
+                    />
+                  )}
 
-                {field.helpText && (
-                  <p id={helpId} className="text-xs text-muted-foreground">
-                    {field.helpText}
-                  </p>
-                )}
-                {error && (
-                  <p id={errorId} className="text-xs text-destructive">
-                    {error}
-                  </p>
-                )}
-              </div>
-            );
-          })}
+                  {field.helpText && (
+                    <p id={helpId} className="text-xs text-muted-foreground">
+                      {field.helpText}
+                    </p>
+                  )}
+                  {error && (
+                    <p id={errorId} className="text-xs text-destructive">
+                      {error}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
 
-          {/* Honeypot. Visually hidden and skipped by keyboard and screen readers,
-              so only bots fill it in. Not display:none, which some bots detect. */}
-          <div className="absolute -left-[9999px] h-px w-px overflow-hidden" aria-hidden="true">
-            <label htmlFor="website-field">Leave this field empty</label>
-            <input
-              id="website-field"
-              type="text"
-              name="website"
-              tabIndex={-1}
-              autoComplete="off"
-              value={honeypot}
-              onChange={(e) => setHoneypot(e.target.value)}
-            />
-          </div>
-
-          {followUpFormId && (
-            <div className="flex items-center gap-2 p-3 bg-primary/5 border border-primary/20 rounded-md text-xs text-primary">
-              <ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" />
-              After submitting, you'll continue to a follow-up form.
+            {/* Honeypot. Visually hidden and skipped by keyboard and screen readers,
+                so only bots fill it in. Not display:none, which some bots detect. */}
+            <div className="absolute -left-[9999px] h-px w-px overflow-hidden" aria-hidden="true">
+              <label htmlFor="website-field">Leave this field empty</label>
+              <input
+                id="website-field"
+                type="text"
+                name="website"
+                tabIndex={-1}
+                autoComplete="off"
+                value={honeypot}
+                onChange={(e) => setHoneypot(e.target.value)}
+              />
             </div>
-          )}
 
-          <Button type="submit" className="w-full" disabled={isSubmitting || fields.length === 0} data-testid="button-submit-form">
-            {isSubmitting ? "Submitting..." : "Submit"}
-          </Button>
-        </form>
-      </Card>
-    </div>
+            {followUpFormId && (
+              <div className="flex items-center gap-2 p-3 bg-primary/5 border border-primary/20 rounded-md text-xs text-primary">
+                <ArrowRight className="h-4 w-4 shrink-0" aria-hidden="true" />
+                After submitting, you'll continue to a follow-up form.
+              </div>
+            )}
+
+            <Button type="submit" className="w-full" disabled={isSubmitting || fields.length === 0} data-testid="button-submit-form">
+              {isSubmitting ? "Submitting..." : "Submit"}
+            </Button>
+          </form>
+        </Card>
+      </div>
+    </PageShell>
   );
 }

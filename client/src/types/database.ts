@@ -145,9 +145,11 @@ export interface FormSettings {
   successMessage?: string
   notificationEmail?: string
   allowMultipleSubmissions?: boolean
+  /** The form's own look; unset values fall back to the organization's branding. See lib/form-appearance.ts. */
   theme?: {
     primaryColor?: string
     backgroundColor?: string
+    logoUrl?: string
   }
 }
 

@@ -37,6 +37,8 @@ import { useAuth } from "@/hooks/use-auth";
 import { useOrganization } from "@/hooks/use-organization";
 import { ReadOnlyNotice } from "@/components/read-only-notice";
 import { friendlyWriteError } from "@/lib/db-errors";
+import { FormAppearanceEditor, appearanceErrors, type AppearanceDraft } from "@/components/form-appearance-editor";
+import { ShareFormDialog } from "@/components/share-form-dialog";
 import { Link } from "wouter";
 import {
   Plus,
@@ -76,6 +78,8 @@ import type { Form, FormField } from "@/types/database";
 interface FormSettings {
   /** Id of the form respondents are sent to after submitting this one. */
   followUpFormId?: string | null;
+  /** Background color, accent color and logo; see lib/form-appearance.ts. */
+  theme?: { backgroundColor?: string; primaryColor?: string; logoUrl?: string };
   [key: string]: unknown;
 }
 
@@ -140,8 +144,15 @@ const getFields = (form?: Form | null): FormField[] => (form?.fields as FormFiel
 const parseOptions = (text: string): string[] =>
   Array.from(new Set(text.split(",").map((s) => s.trim()).filter(Boolean)));
 
-/** Build the public URL people use to fill out a form. */
-const getShareUrl = (formId: string): string => `${window.location.origin}/forms/${formId}/submit`;
+/** The form's saved look as editable text ("" = use the organization's branding). */
+const getAppearanceDraft = (form?: Form | null): AppearanceDraft => {
+  const theme = getSettings(form).theme ?? {};
+  return {
+    backgroundColor: theme.backgroundColor ?? "",
+    primaryColor: theme.primaryColor ?? "",
+    logoUrl: theme.logoUrl ?? "",
+  };
+};
 
 // ===========================================================================
 // OptionsInput
@@ -221,6 +232,7 @@ function FormBuilder({
   const [fields, setFields] = useState<FormField[]>(getFields(form));
   const [isPublished, setIsPublished] = useState(form?.is_published ?? false);
   const [followUpFormId, setFollowUpFormId] = useState<string>(getSettings(form).followUpFormId ?? "");
+  const [appearance, setAppearance] = useState<AppearanceDraft>(getAppearanceDraft(form));
   const [isSaving, setIsSaving] = useState(false);
 
   /** Validation messages are hidden until the user first tries to save. */
@@ -237,10 +249,11 @@ function FormBuilder({
       fields: getFields(form),
       isPublished: form?.is_published ?? false,
       followUpFormId: getSettings(form).followUpFormId ?? "",
+      appearance: getAppearanceDraft(form),
     }),
   );
   const isDirty =
-    JSON.stringify({ title, description, fields, isPublished, followUpFormId }) !== initialSnapshot;
+    JSON.stringify({ title, description, fields, isPublished, followUpFormId, appearance }) !== initialSnapshot;
 
   // Start at the top of the page when the builder opens.
   useEffect(() => {
@@ -338,7 +351,7 @@ function FormBuilder({
 
   const titleError = !title.trim() ? "Give your form a name." : null;
   const publishError = isPublished && fields.length === 0 ? "Add at least one field before publishing." : null;
-  const hasErrors = Boolean(titleError || publishError || fieldErrors.some(Boolean));
+  const hasErrors = Boolean(titleError || publishError || fieldErrors.some(Boolean) || appearanceErrors(appearance));
 
   // -------------------------------------------------------------------------
   // Save / cancel
@@ -372,7 +385,14 @@ function FormBuilder({
       }));
 
       // Spread existing settings first so unrelated keys are preserved.
-      const settings: FormSettings = { ...getSettings(form), followUpFormId: followUpFormId || null };
+      // Only colors and logo that are set are saved; the rest fall back to the organization's branding.
+      const theme = Object.fromEntries(Object.entries(appearance).filter(([, v]) => v)) as FormSettings["theme"];
+      const { theme: _oldTheme, ...otherSettings } = getSettings(form);
+      const settings: FormSettings = {
+        ...otherSettings,
+        followUpFormId: followUpFormId || null,
+        ...(theme && Object.keys(theme).length ? { theme } : {}),
+      };
 
       const payload = {
         title: title.trim(),
@@ -458,6 +478,9 @@ function FormBuilder({
           data-testid="input-form-description"
         />
       </div>
+
+      {/* ===== Colors and logo ===== */}
+      <FormAppearanceEditor value={appearance} onChange={setAppearance} userId={userId} />
 
       {/* ===== Follow-up form connection ===== */}
       <div className="space-y-2 p-4 border rounded-md bg-muted/30">
@@ -700,6 +723,8 @@ export default function FormsPage() {
   /** True when the builder is open to create a new form. */
   const [showBuilder, setShowBuilder] = useState(false);
   const [previewForm, setPreviewForm] = useState<Form | null>(null);
+  /** Form whose Share dialog (link and embed code) is open. */
+  const [shareForm, setShareForm] = useState<Form | null>(null);
 
   // ----- Archive confirmation state -----
   const [pendingArchive, setPendingArchive] = useState<Form | null>(null);
@@ -752,28 +777,6 @@ export default function FormsPage() {
   // -------------------------------------------------------------------------
   // Card actions
   // -------------------------------------------------------------------------
-
-  /**
-   * Copy the public submit link to the clipboard.
-   *
-   * The original did not await the clipboard call, so failures (blocked
-   * permission, non-https page) went unnoticed and the toast still said
-   * "copied". Failures now show the link so it can be copied by hand.
-   */
-  const handleShare = async (form: Form) => {
-    const url = getShareUrl(form.id);
-    try {
-      await navigator.clipboard.writeText(url);
-      toast({
-        title: "Link copied",
-        description: form.is_published
-          ? "Share this link with anyone."
-          : "This form is a draft. Publish it so people can open the link.",
-      });
-    } catch {
-      toast({ title: "Couldn't copy automatically", description: `Copy this link: ${url}` });
-    }
-  };
 
   /**
    * Make an unpublished copy of a form.
@@ -1012,11 +1015,11 @@ export default function FormsPage() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => handleShare(form)}
-                    aria-label={`Copy share link for ${form.title}`}
-                    title="Copy share link"
+                    onClick={() => setShareForm(form)}
+                    aria-label={`Share or embed ${form.title}`}
+                    title="Share link or embed on a website"
                   >
-                    <Link2 className="h-3.5 w-3.5" aria-hidden="true" />
+                    <Link2 className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> Share
                   </Button>
                   {canEdit && (
                     <>
@@ -1067,6 +1070,9 @@ export default function FormsPage() {
           )}
         </div>
       )}
+
+      {/* ===== Share dialog: link and website embed code ===== */}
+      <ShareFormDialog form={shareForm} onClose={() => setShareForm(null)} />
 
       {/* ===== Preview dialog =====
           Read-only rendering of the form as respondents will see it.
