@@ -14,6 +14,7 @@
  *     /forgot-password
  *     /reset-password    where password reset emails land
  *     /delete-account    where account deletion confirmation emails land
+ *     /enterprise                  Enterprise "Contact us" form
  *     /terms, /privacy, /refunds   legal pages (linked from landing, signup
  *                        and the Plan section)
  *
@@ -69,6 +70,7 @@ import AcceptInvitePage from "@/pages/accept-invite";
 import TermsPage from "@/pages/terms";
 import PrivacyPage from "@/pages/privacy";
 import RefundsPage from "@/pages/refunds";
+import EnterprisePage from "@/pages/enterprise";
 
 // ===========================================================================
 // Signed-in area
@@ -191,6 +193,7 @@ function AppContent() {
       <Route path="/terms" component={TermsPage} />
       <Route path="/privacy" component={PrivacyPage} />
       <Route path="/refunds" component={RefundsPage} />
+      <Route path="/enterprise" component={EnterprisePage} />
 
       {/* Signed-in users go to the dashboard instead of seeing login/signup.
           Each page also honors ?redirect=, which is how invite links send

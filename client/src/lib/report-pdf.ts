@@ -83,8 +83,14 @@ const chartsFrom = (root: HTMLElement | null): string => {
   return blocks.length ? `<h2>Charts</h2><div class="charts">${blocks.join("")}</div>` : "";
 };
 
-/** Open the report. Returns false if the browser blocked the new tab. */
-export function openPrintableReport(opts: {
+/**
+ * Open the report. Resolves false if the browser blocked the new tab.
+ *
+ * beforeWrite runs after the tab opens (it has to open right away, inside
+ * the click, or pop-up blockers stop it) and before the report is written.
+ * If it throws, the tab closes and the error is passed on.
+ */
+export async function openPrintableReport(opts: {
   title: string;
   periodLine: string;
   orgName: string;
@@ -95,9 +101,22 @@ export function openPrintableReport(opts: {
   body: string;
   /** Element containing the on-screen charts to copy (data-report-chart). */
   chartsRoot?: HTMLElement | null;
-}): boolean {
+  beforeWrite?: () => Promise<unknown>;
+}): Promise<boolean> {
   const w = window.open("", "_blank");
   if (!w) return false;
+
+  if (opts.beforeWrite) {
+    w.document.write('<p style="font-family: sans-serif; padding: 48px; color: #555">Preparing your report...</p>');
+    w.document.close();
+    try {
+      await opts.beforeWrite();
+    } catch (err) {
+      w.close();
+      throw err;
+    }
+    w.document.open();
+  }
 
   const brand = opts.brandColor && HEX.test(opts.brandColor) ? opts.brandColor : DEFAULT_BRAND;
   const logo = opts.logoUrl && /^https:\/\//.test(opts.logoUrl) ? opts.logoUrl : null;

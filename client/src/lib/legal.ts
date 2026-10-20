@@ -15,7 +15,7 @@ export const LEGAL = {
   /** The legal entity that provides the service and signs the terms. */
   companyName: "HumMotion", // TODO: your legal business name, e.g. "Big State Electric LTD"
   /** Where people send questions, privacy requests and refund requests. */
-  contactEmail: "support@example.com", // TODO: a real inbox someone reads
+  contactEmail: "info@hummotion.com",
   /** Postal address. Required by some states; leave "" to hide it. */
   mailingAddress: "", // TODO: e.g. "123 Main St, Austin, TX 78701"
   /** Whose laws govern the terms. */
@@ -23,7 +23,7 @@ export const LEGAL = {
   /** Where disputes are heard. */
   venue: "the state and federal courts located in Texas", // TODO: confirm (e.g. a specific county)
   /** Shown as "Last updated". Change it whenever the terms change (YYYY-MM-DD). */
-  effectiveDate: "2026-10-14",
+  effectiveDate: "2026-10-19",
 };
 
 /**

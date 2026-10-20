@@ -9,7 +9,7 @@
  *   3. Features     grid of eight product areas          (#features)
  *   4. Reports      report types and what they include  (#reports)
  *   5. Forms        special field types and sequences    (#forms)
- *   6. Pricing      Starter and Mission plans            (#pricing)
+ *   6. Pricing      Starter, Mission and Enterprise      (#pricing)
  *   7. Final CTA
  *   8. Footer
  *
@@ -17,11 +17,21 @@
  * text can be edited without touching the layout.
  */
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { AppLogo } from "@/components/app-logo";
+import { BillingCycleToggle } from "@/components/billing-cycle-toggle";
+import {
+  PLANS,
+  PLAN_ORDER,
+  ENTERPRISE_CONTACT_PATH,
+  billingLabel,
+  formatDollars,
+  monthlyEquivalent,
+  type BillingCycle,
+} from "@/lib/plans";
 import { useAuth } from "@/hooks/use-auth";
 import {
   BarChart3,
@@ -181,40 +191,14 @@ const FORM_CAPABILITIES: { icon: LucideIcon; title: string; desc: string; color:
   },
 ];
 
-/** Pricing plans. Keep in sync with PLANS in components/plan-section.tsx and the Stripe prices. */
-const PLANS: {
-  name: string;
-  price: string;
-  period: string;
-  badge?: string;
-  features: string[];
-  cta: string;
-  highlight: boolean;
-}[] = [
-  {
-    name: "Starter",
-    price: "$5",
-    period: "per month",
-    features: [
-      "Unlimited forms with media fields",
-      "Donation & volunteer hour tracking",
-      "Visual impact reports + PDF export",
-      "Media library",
-      "Inventory with low-stock alerts",
-    ],
-    cta: "Start 30-day free trial",
-    highlight: false,
-  },
-  {
-    name: "Mission",
-    price: "$3",
-    period: "per month, billed annually",
-    badge: "Save 40%",
-    features: ["Everything in Starter", "Custom organization branding", "Priority support", "Early access to new features"],
-    cta: "Start 30-day free trial",
-    highlight: true,
-  },
-];
+/** Pricing cards. Prices, limits and bullet points come from lib/plans. */
+const PRICING_CARDS = PLAN_ORDER.map((id) => ({
+  plan: PLANS[id],
+  badge: id === "mission" ? "Most popular" : undefined,
+  cta: id === "enterprise" ? "Contact us" : "Start 30-day free trial",
+  href: id === "enterprise" ? ENTERPRISE_CONTACT_PATH : "/signup",
+  highlight: id === "mission",
+}));
 
 /** In-page links shown in the header on larger screens. */
 const NAV_LINKS = [
@@ -335,6 +319,7 @@ function DashboardMockup() {
 
 export default function LandingPage() {
   const { user } = useAuth();
+  const [cycle, setCycle] = useState<BillingCycle>("monthly");
 
   /** Give the browser tab and search results a descriptive title. */
   useEffect(() => {
@@ -579,7 +564,7 @@ export default function LandingPage() {
             section directly above, so the two sections ran together with no
             visible break. */}
         <section id="pricing" className="py-24 px-6 scroll-mt-16" aria-labelledby="pricing-heading">
-          <div className="max-w-4xl mx-auto">
+          <div className="max-w-6xl mx-auto">
             <div className="text-center mb-14 space-y-3">
               <Eyebrow>Pricing</Eyebrow>
               <h2 id="pricing-heading" className="text-4xl font-serif font-bold">
@@ -588,31 +573,38 @@ export default function LandingPage() {
               <p className="text-muted-foreground text-lg">
                 Spend your funds on your mission, not your tools. Every plan starts with 30 days free, no card needed.
               </p>
+              <BillingCycleToggle value={cycle} onChange={setCycle} className="mt-4" />
             </div>
 
-            <div className="grid sm:grid-cols-2 gap-6">
-              {PLANS.map((plan) => (
+            <div className="grid md:grid-cols-3 gap-6">
+              {PRICING_CARDS.map(({ plan, badge, cta, href, highlight }) => (
                 <Card
-                  key={plan.name}
-                  className={`p-8 flex flex-col gap-6 ${plan.highlight ? "border-primary ring-2 ring-primary shadow-lg" : ""}`}
+                  key={plan.id}
+                  className={`p-8 flex flex-col gap-6 ${highlight ? "border-primary ring-2 ring-primary shadow-lg" : ""}`}
                 >
                   <div className="space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       <h3 className="text-xl font-serif font-bold">{plan.name}</h3>
-                      {plan.badge && (
+                      {badge && (
                         <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-primary text-primary-foreground">
-                          {plan.badge}
+                          {badge}
                         </span>
                       )}
                     </div>
-                    <p className="flex items-baseline gap-1">
-                      <span className="text-4xl font-bold">{plan.price}</span>
-                      <span className="text-muted-foreground text-sm">/{plan.period}</span>
-                    </p>
+                    <p className="text-sm text-muted-foreground">{plan.tagline}</p>
+                    {monthlyEquivalent(plan, cycle) === null ? (
+                      <p className="text-4xl font-bold">Custom</p>
+                    ) : (
+                      <p className="flex items-baseline gap-1">
+                        <span className="text-4xl font-bold">{formatDollars(monthlyEquivalent(plan, cycle)!)}</span>
+                        <span className="text-muted-foreground text-sm">/month</span>
+                      </p>
+                    )}
+                    <p className="text-sm text-muted-foreground">{billingLabel(plan, cycle)}</p>
                   </div>
 
                   <ul className="space-y-2.5">
-                    {plan.features.map((f) => (
+                    {plan.highlights.map((f) => (
                       <li key={f} className="flex items-start gap-2 text-sm">
                         <CheckCircle2 className="h-4 w-4 text-primary shrink-0 mt-0.5" aria-hidden="true" />
                         <span>{f}</span>
@@ -623,12 +615,12 @@ export default function LandingPage() {
                   {/* mt-auto lines up both buttons at the bottom even though the
                       feature lists are different lengths. */}
                   <LinkButton
-                    href="/signup"
+                    href={href}
                     className="w-full mt-auto"
-                    variant={plan.highlight ? "default" : "outline"}
+                    variant={highlight ? "default" : "outline"}
                     size="lg"
                   >
-                    {plan.cta} <ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />
+                    {cta} <ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" />
                   </LinkButton>
                 </Card>
               ))}

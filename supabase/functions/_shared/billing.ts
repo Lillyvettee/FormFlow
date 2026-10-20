@@ -4,8 +4,13 @@
 //
 // Secrets (set with `supabase secrets set NAME=value`):
 //   STRIPE_SECRET_KEY        sk_test_... or sk_live_...
-//   STRIPE_PRICE_STARTER     price_... for Starter ($5/month)
-//   STRIPE_PRICE_MISSION     price_... for Mission ($36/year)
+//   STRIPE_PRICE_STARTER_MONTHLY   price_... for Starter, $49/month
+//   STRIPE_PRICE_STARTER_YEARLY    price_... for Starter, $470/year
+//   STRIPE_PRICE_MISSION_MONTHLY   price_... for Mission, $199/month
+//   STRIPE_PRICE_MISSION_YEARLY    price_... for Mission, $1,910/year
+//   STRIPE_PRICE_STARTER, STRIPE_PRICE_MISSION
+//                            optional: the old $5 and $36 prices, so
+//                            existing subscriptions keep their plan
 //   STRIPE_WEBHOOK_SECRET    whsec_... (stripe-webhook only)
 //   SITE_URL                 e.g. https://your-site.vercel.app
 //
@@ -17,7 +22,9 @@ import Stripe from "npm:stripe@17.7.0";
 import { requireEnv } from "./env.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 
+/** Plans sold through Stripe. Enterprise is set by hand after a sales conversation. */
 export type PaidPlan = "starter" | "mission";
+export type BillingCycle = "monthly" | "yearly";
 
 export const stripe = new Stripe(requireEnv("STRIPE_SECRET_KEY"), {
   httpClient: Stripe.createFetchHttpClient(),
@@ -55,15 +62,18 @@ export class UserError extends Error {
 // Plans and prices
 // ------------------------------------------------------------
 
-export function priceIdForPlan(plan: unknown): string | null {
-  if (plan === "starter") return requireEnv("STRIPE_PRICE_STARTER");
-  if (plan === "mission") return requireEnv("STRIPE_PRICE_MISSION");
-  return null;
+export function priceIdForPlan(plan: unknown, cycle: unknown): string | null {
+  if (plan !== "starter" && plan !== "mission") return null;
+  if (cycle !== "monthly" && cycle !== "yearly") return null;
+  return requireEnv(`STRIPE_PRICE_${plan.toUpperCase()}_${cycle.toUpperCase()}`);
 }
 
 export function planForPriceId(priceId: string | undefined): PaidPlan | null {
-  if (priceId === Deno.env.get("STRIPE_PRICE_STARTER")) return "starter";
-  if (priceId === Deno.env.get("STRIPE_PRICE_MISSION")) return "mission";
+  if (!priceId) return null;
+  for (const plan of ["starter", "mission"] as const) {
+    const names = [`STRIPE_PRICE_${plan.toUpperCase()}_MONTHLY`, `STRIPE_PRICE_${plan.toUpperCase()}_YEARLY`, `STRIPE_PRICE_${plan.toUpperCase()}`];
+    if (names.some((name) => Deno.env.get(name) === priceId)) return plan;
+  }
   return null;
 }
 

@@ -10,75 +10,7 @@ export type TeamRole = 'admin' | 'member' | 'viewer'
 export type TeamMemberStatus = 'pending' | 'active'
 export type ItemCondition = 'new' | 'good' | 'fair' | 'poor'
 
-// ============================================================
-// PLAN CONFIG
-// Update prices/limits here — they flow through the entire app
-// ============================================================
-export const PLAN_CONFIG = {
-  free: {
-    name: 'Free',
-    description: 'Get started at no cost',
-    monthlyPrice: 0,
-    yearlyPrice: 0,
-    yearlyDiscount: 0,
-    limits: {
-      forms: 3,           // TODO: Set your limit
-      responsesPerMonth: 100, // TODO: Set your limit
-      seats: 1,
-    },
-    features: [
-      'Up to 3 forms',
-      '100 responses/month',
-      '1 seat',
-      'Basic reporting',
-    ],
-  },
-  starter: {
-    name: 'Starter',
-    description: 'For growing non-profits',
-    monthlyPrice: 0,      // TODO: Set price (e.g. 1500 = $15.00)
-    yearlyPrice: 0,       // TODO: Set yearly price
-    yearlyDiscount: 0,    // TODO: Set discount percentage (e.g. 20)
-    stripeMonthlyPriceId: 'price_TODO_starter_monthly',
-    stripeYearlyPriceId: 'price_TODO_starter_yearly',
-    limits: {
-      forms: 15,          // TODO: Set your limit
-      responsesPerMonth: 1000, // TODO: Set your limit
-      seats: 3,           // TODO: Set your limit
-    },
-    features: [
-      'Up to 15 forms',
-      '1,000 responses/month',
-      '3 seats',
-      'Advanced reporting',
-      'CSV export',
-      'Email notifications',
-    ],
-  },
-  mission: {
-    name: 'Mission',
-    description: 'For established non-profits',
-    monthlyPrice: 0,      // TODO: Set price
-    yearlyPrice: 0,       // TODO: Set yearly price
-    yearlyDiscount: 0,    // TODO: Set discount percentage
-    stripeMonthlyPriceId: 'price_TODO_mission_monthly',
-    stripeYearlyPriceId: 'price_TODO_mission_yearly',
-    limits: {
-      forms: Infinity,
-      responsesPerMonth: Infinity,
-      seats: 10,
-    },
-    features: [
-      'Unlimited forms',
-      'Unlimited responses',
-      '10 seats',
-      'Custom branding',
-      'Priority support',
-      'Impact reports',
-      'All Starter features',
-    ],
-  },
-} as const
+// Plan prices, limits and features live in lib/plans.ts.
 
 // ============================================================
 // DATABASE ROW TYPES

@@ -96,8 +96,9 @@ export default function TermsPage() {
       <Section title="6. Plans, billing and automatic renewal">
         <ul>
           <li>
-            Paid plans are Starter ($5 per month, billed monthly) and Mission ($36 per year, billed yearly). Prices are
-            in US dollars and don't include any taxes that may apply.
+            Paid plans are Starter ($49 per month, or $470 per year) and Mission ($199 per month, or $1,910 per year).
+            Enterprise is priced by agreement with us. Each plan includes the limits shown on our pricing page and in
+            Settings &gt; Plan. Prices are in US dollars and don't include any taxes that may apply.
           </li>
           <li>
             <strong>Subscriptions renew automatically</strong> at the end of each billing period (monthly or yearly) and

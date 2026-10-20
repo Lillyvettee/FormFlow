@@ -96,7 +96,7 @@ export function FormAppearanceEditor({
   onChange: (next: AppearanceDraft) => void;
   userId: string;
 }) {
-  const { branding } = useOrganization();
+  const { branding, plan } = useOrganization();
   const fileRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
@@ -136,6 +136,25 @@ export function FormAppearanceEditor({
   // Small live preview of the title area and button.
   const bg = HEX_PATTERN.test(value.backgroundColor) ? value.backgroundColor : null;
   const accent = HEX_PATTERN.test(value.primaryColor) ? value.primaryColor : branding.primaryColor ?? APP_DEFAULT_ACCENT;
+
+  // Custom branding is a Mission and Enterprise feature. Public forms ignore
+  // saved colors and logos on other plans (get_public_form_branding).
+  if (!plan.features.branding) {
+    return (
+      <div className="space-y-1 p-4 border rounded-md bg-muted/30">
+        <div className="flex items-center gap-2">
+          <Palette className="h-4 w-4 text-primary" aria-hidden="true" />
+          <h2 className="text-sm font-medium">Appearance</h2>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Custom colors and logos are included with the Mission and Enterprise plans.{" "}
+          <a href="/settings#plan" className="underline hover:text-foreground">
+            See plans
+          </a>
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4 p-4 border rounded-md bg-muted/30">

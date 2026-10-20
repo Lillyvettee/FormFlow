@@ -553,8 +553,17 @@ export default function SubmitFormPage({ embed = false }: { embed?: boolean; par
    * record, and doesn't store it.
    */
   const [personToken] = useState(() => new URLSearchParams(window.location.search).get(PERSON_LINK_PARAM));
-  /** The organization's name, logo and color (get_public_form_branding, migration 006). */
-  const [branding, setBranding] = useState<{ organization_name: string; primary_color: string | null; logo_url: string | null } | null>(null);
+  /**
+   * The organization's name, logo and color (get_public_form_branding,
+   * migrations 006 and 016). custom_branding is false on plans without it,
+   * and then the form's own colors and logo are ignored too.
+   */
+  const [branding, setBranding] = useState<{
+    organization_name: string;
+    primary_color: string | null;
+    logo_url: string | null;
+    custom_branding: boolean;
+  } | null>(null);
   const [logoFailed, setLogoFailed] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
@@ -586,7 +595,7 @@ export default function SubmitFormPage({ embed = false }: { embed?: boolean; par
   /** Questions shown right now, given the answers so far (conditional questions). */
   const visibleFields = fields.filter((f) => isFieldVisible(f, fields, answers));
   const followUpFormId = getFollowUpId(form);
-  const appearance = getAppearance(form);
+  const appearance = getAppearance(branding?.custom_branding ? form : null);
   const logoUrl = appearance.logoUrl ?? branding?.logo_url ?? null;
   /** Text on a custom background (the title area) switches to dark or light to stay readable. */
   const headerColor = appearance.backgroundColor
@@ -650,13 +659,11 @@ export default function SubmitFormPage({ embed = false }: { embed?: boolean; par
   useEffect(() => {
     if (!form?.id) return;
     let cancelled = false;
-    const ownColor = getAppearance(form).primaryColor;
-    if (ownColor) setBrandColor("page", ownColor);
     supabase.rpc("get_public_form_branding", { p_form_id: form.id }).then(({ data }) => {
       const row = Array.isArray(data) ? data[0] : data;
       if (cancelled || !row) return;
       setBranding(row);
-      if (!ownColor) setBrandColor("page", row.primary_color);
+      if (row.custom_branding) setBrandColor("page", getAppearance(form).primaryColor ?? row.primary_color);
     });
     return () => {
       cancelled = true;

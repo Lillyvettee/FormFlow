@@ -1,6 +1,6 @@
 # Billing setup
 
-How to turn on the 30-day free trial, paid plans and promotion codes.
+How to turn on the 30-day free trial, the Starter, Mission and Enterprise plans, and promotion codes.
 Do the steps in order. Stay in Stripe **test mode** until step 8, so no real money moves.
 
 | What | Where it lives |
@@ -8,7 +8,10 @@ Do the steps in order. Stay in Stripe **test mode** until step 8, so no real mon
 | Trial, read-only mode | `supabase/migrations/004_billing.sql` |
 | Checkout, billing portal, Stripe webhook, trial reminders | `supabase/functions/` |
 | Daily reminder schedule | `supabase/migrations/005_trial_reminders.sql` |
+| Prices, limits and features (app) | `client/src/lib/plans.ts` |
+| Limits enforced by the database, Enterprise inquiries | `supabase/migrations/016_plans_and_limits.sql` |
 | Plan section in Settings | `client/src/components/plan-section.tsx` |
+| Enterprise "Contact us" form | `client/src/pages/enterprise.tsx`, `supabase/functions/enterprise-inquiry/` |
 | Trial / read-only banner | `client/src/components/billing-banner.tsx` |
 
 ## 1. Update the database (before pushing the app)
@@ -29,6 +32,7 @@ In the Supabase dashboard, open **SQL Editor** and run each file, in order:
 10. `supabase/migrations/013_form_notifications.sql` (email alerts and confirmations for form responses; also deploy `form-notify` in step 4)
 11. `supabase/migrations/014_private_form_uploads.sql` (private storage for form photos and voice memos, and upload limits)
 12. `supabase/migrations/015_people_access_and_history.sql` (who can see People, and a change history for admins)
+13. `supabase/migrations/016_plans_and_limits.sql` (plan limits, monthly PDF report counts, Starter branding lock, Enterprise inquiries)
 
 `005_trial_reminders.sql` comes later, in step 6.
 
@@ -38,10 +42,11 @@ Every existing organization's 30 days start when you run 004.
 
 1. Sign up at https://dashboard.stripe.com/register. Keep the **Test mode** switch on.
 2. **Product catalog > Add product**:
-   - Name `Starter`, recurring, **$5.00 per month**. Save, then copy the price ID (`price_...`).
-   - Name `Mission`, recurring, **$36.00 per year**. Copy its price ID.
+   - Name `Starter`, with two recurring prices: **$49.00 per month** and **$470.00 per year**. Copy both price IDs (`price_...`).
+   - Name `Mission`, with two recurring prices: **$199.00 per month** and **$1,910.00 per year**. Copy both price IDs.
+   - Enterprise has no product here. See "Enterprise" under How it behaves.
 3. Optional, for discounts: **Product catalog > Coupons > New**. Choose the discount and how long it lasts (for example 50%, Forever). Then, on the coupon, **Add promotion code** and type the code customers will enter (for example `LAUNCH50`). You can limit it to first-time customers, a number of uses or an expiry date. Customers enter it on the checkout page; no app changes are needed for new codes.
-4. **Settings > Billing > Customer portal**: activate it. Allow updating payment methods, viewing invoices and canceling. Under "Switch plans", add both products.
+4. **Settings > Billing > Customer portal**: activate it. Allow updating payment methods, viewing invoices and canceling. Under "Switch plans", add both products with both of their prices, so customers can move between plans and between monthly and yearly.
 5. **Developers > API keys**: copy the **Secret key** (`sk_test_...`).
 
 ## 3. Set up email
@@ -52,7 +57,7 @@ Every existing organization's 30 days start when you run 004.
 Resend's built-in sender (`onboarding@resend.dev`) can only send to the address you signed up with. **Trial reminder and account deletion emails go to customers, so they need your own domain**:
 
 3. **Domains > Add domain**. Add the DNS records Resend shows you, where your domain is managed. Wait until it says Verified.
-4. Choose a sender on that domain, for example `HumMotion <billing@yourdomain.com>`. You'll set it as `NOTIFY_FROM` in step 4.
+4. Choose a sender on that domain, for example `HumMotion <info@hummotion.com>`. You'll set it as `NOTIFY_FROM` in step 4.
 
 Until `NOTIFY_FROM` is set, the reminder job runs but sends nothing. Its log says why.
 
@@ -65,11 +70,13 @@ npx supabase login
 npx supabase link --project-ref dmboosigttutyqaujdjv
 
 npx supabase secrets set STRIPE_SECRET_KEY=sk_test_...
-npx supabase secrets set STRIPE_PRICE_STARTER=price_...
-npx supabase secrets set STRIPE_PRICE_MISSION=price_...
+npx supabase secrets set STRIPE_PRICE_STARTER_MONTHLY=price_...
+npx supabase secrets set STRIPE_PRICE_STARTER_YEARLY=price_...
+npx supabase secrets set STRIPE_PRICE_MISSION_MONTHLY=price_...
+npx supabase secrets set STRIPE_PRICE_MISSION_YEARLY=price_...
 npx supabase secrets set SITE_URL=https://your-site.vercel.app
 npx supabase secrets set RESEND_API_KEY=re_...
-npx supabase secrets set "NOTIFY_FROM=HumMotion <billing@yourdomain.com>"
+npx supabase secrets set "NOTIFY_FROM=HumMotion <info@hummotion.com>"
 npx supabase secrets set CRON_SECRET=paste-a-long-random-value
 
 npx supabase functions deploy create-checkout
@@ -79,11 +86,16 @@ npx supabase functions deploy trial-reminders --no-verify-jwt
 npx supabase functions deploy request-account-deletion
 npx supabase functions deploy confirm-account-deletion --no-verify-jwt
 npx supabase functions deploy form-notify --no-verify-jwt
+npx supabase functions deploy enterprise-inquiry --no-verify-jwt
 ```
+
+Enterprise requests are emailed to info@hummotion.com. To send them somewhere else, run `npx supabase secrets set ENTERPRISE_NOTIFY_TO=sales@example.org` (comma-separate several addresses).
+
+If you already had the old $5 and $36 prices set as `STRIPE_PRICE_STARTER` and `STRIPE_PRICE_MISSION`, leave them set: existing subscriptions on those prices keep their plan. New checkouts use the four new prices.
 
 For `CRON_SECRET`, use any long random value, such as a password from a password manager. Keep it handy for step 6.
 
-`--no-verify-jwt` is required for `stripe-webhook`, `trial-reminders`, `confirm-account-deletion` and `form-notify`, because their callers aren't signed in to Supabase. The webhook checks Stripe's signature, the reminders check `CRON_SECRET`, account deletion checks the one-time link from the email, and form-notify only sends once per new response (within 15 minutes of it being submitted) with an hourly cap per form.
+`--no-verify-jwt` is required for `stripe-webhook`, `trial-reminders`, `confirm-account-deletion`, `form-notify` and `enterprise-inquiry`, because their callers aren't signed in to Supabase. The webhook checks Stripe's signature, the reminders check `CRON_SECRET`, account deletion checks the one-time link from the email, and form-notify only sends once per new response (within 15 minutes of it being submitted) with an hourly cap per form.
 
 Account deletion emails and form notifications, like trial reminders, go to customers, so they need `NOTIFY_FROM` (step 3). `form-notify` doesn't need the Stripe secrets, so form emails work even before billing is set up.
 
@@ -150,3 +162,26 @@ If something fails, the error details are in **Supabase > Edge Functions > (func
 - **Reminder emails:** owners and admins get one 7 days before the trial ends, one the day before, and one when it ends. Organizations that have subscribed get none.
 - **Deleting an account:** Settings > Delete account emails a one-time link that expires in 24 hours, and nothing is deleted until the person opens it and confirms. If they're their organization's only member, the organization, its records and files go too, and any subscription is canceled at once. If they're on a team, they leave it and their records stay. The only owner of a team must make someone else an owner first.
 - **Who can pay:** only owners and admins. Billing belongs to the organization, so the whole team shares one subscription.
+- **Plans and limits:**
+
+  | | Starter | Mission | Enterprise |
+  |---|---|---|---|
+  | Price | $49/month or $470/year | $199/month or $1,910/year | Contact us |
+  | Active forms | 50 | 100 | Unlimited |
+  | Team members (including the owner and open invitations) | 2 | 10 | Unlimited |
+  | Client profiles (People) | 200 | 500 | Unlimited |
+  | PDF reports per month | 50 | 100 | Unlimited |
+  | Impact tracking | Yes | Yes | Yes |
+  | CSV and Excel import and export | No | Yes | Yes |
+  | Custom branding (logo, colors, per-form appearance) | No | Yes | Yes |
+
+  Yearly is 20% off twelve months, rounded down to whole dollars. During the free trial, organizations get Mission's limits. The database refuses new forms, people, invitations and PDF reports past the limit, and Starter organizations can't save branding. Nothing that already exists is removed when an organization moves to a smaller plan. Import and export are hidden from Starter in the app only, because they run in the browser. To change a limit, edit both `client/src/lib/plans.ts` and `plan_limit()` in a new migration.
+- **Enterprise:** the "Contact us" buttons open `/enterprise`. Each request is saved in **Table Editor > enterprise_inquiries** and emailed to info@hummotion.com. After you agree a price, bill them outside the app (an invoice, or a custom Stripe price), then turn the plan on in the SQL Editor:
+
+  ```sql
+  update organization_billing set plan = 'enterprise', status = 'active'
+  where organization_id = (select organization_id from organization_members
+                           where email = 'owner@their-org.org');
+  ```
+
+  To end it, set `status = 'canceled'`.

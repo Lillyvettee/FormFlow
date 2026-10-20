@@ -36,6 +36,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
 import { useOrganization } from "@/hooks/use-organization";
+import { useImportExportGate } from "@/hooks/use-import-export-gate";
 import { ReadOnlyNotice } from "@/components/read-only-notice";
 import { friendlyWriteError } from "@/lib/db-errors";
 import { Plus, DollarSign, Trash2, Pencil, Download, TrendingUp, Search, Upload } from "lucide-react";
@@ -163,6 +164,7 @@ export default function DonationsPage() {
   const { toast } = useToast();
   /** False for viewers and for read-only organizations; hides add/edit/delete controls. */
   const { canEdit } = useOrganization();
+  const gateImportExport = useImportExportGate();
   /** Organization's field settings: renamed labels, hidden fields, split names, custom fields. */
   const fields = useTrackerFields("donations");
   /** Import window (CSV or Excel). */
@@ -567,7 +569,7 @@ export default function DonationsPage() {
         <div className="flex items-center gap-2">
           {/* Only offer export when there is something to export. */}
           {filteredDonations.length > 0 && (
-            <Button variant="outline" onClick={exportCSV}>
+            <Button variant="outline" onClick={gateImportExport(exportCSV)}>
               <Download className="mr-1 h-4 w-4" aria-hidden="true" /> Export CSV
             </Button>
           )}
@@ -575,7 +577,7 @@ export default function DonationsPage() {
           <CustomizeFieldsButton fields={fields} />
           {canEdit && (
             <>
-              <Button variant="outline" onClick={() => setShowImport(true)}>
+              <Button variant="outline" onClick={gateImportExport(() => setShowImport(true))}>
                 <Upload className="mr-1 h-4 w-4" aria-hidden="true" /> Import
               </Button>
               <Button onClick={openCreate}>

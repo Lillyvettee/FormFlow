@@ -185,7 +185,9 @@ function PasswordInput({
 export default function SettingsPage() {
   const { toast } = useToast();
   const { user, logout } = useAuth();
-  const { organization, role, isAdmin, refresh: refreshOrganization } = useOrganization();
+  const { organization, role, isAdmin, plan, refresh: refreshOrganization } = useOrganization();
+  /** Custom logo and color are Mission and Enterprise features (the database enforces it too). */
+  const canBrand = isAdmin && plan.features.branding;
 
   // ----- Profile -----
   const [fullName, setFullName] = useState("");
@@ -367,7 +369,7 @@ export default function SettingsPage() {
    * and the database rejects anyone else regardless.
    */
   const saveBranding = async () => {
-    if (!user || !organization || !isAdmin || logoError || colorError || isSavingBranding) return;
+    if (!user || !organization || !canBrand || logoError || colorError || isSavingBranding) return;
     setIsSavingBranding(true);
     try {
       const next = {
@@ -667,6 +669,15 @@ export default function SettingsPage() {
           </p>
         )}
 
+        {isAdmin && !plan.features.branding && (
+          <p className="mb-4 rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
+            Custom logos and colors are included with the Mission and Enterprise plans.{" "}
+            <a href="#plan" className="text-primary hover:underline">
+              See plans
+            </a>
+          </p>
+        )}
+
         {brandingLoading ? (
           <div className="space-y-4" aria-busy="true">
             <Skeleton className="h-10 w-full" />
@@ -684,7 +695,7 @@ export default function SettingsPage() {
             }}
           >
             {/* A disabled fieldset makes every control inside read-only for non-admins. */}
-            <fieldset disabled={!isAdmin || isSavingBranding} className="space-y-5 disabled:opacity-90">
+            <fieldset disabled={!canBrand || isSavingBranding} className="space-y-5 disabled:opacity-90">
             {/* Organization name: shown here, edited on the Team page (its one home). */}
             <div className="space-y-1">
               <p className="text-sm font-medium">Organization name</p>
@@ -804,7 +815,7 @@ export default function SettingsPage() {
             </fieldset>
 
             {/* Save button only for those who can save. */}
-            {isAdmin && (
+            {canBrand && (
               <Button
                 type="submit"
                 disabled={!brandingDirty || Boolean(logoError) || Boolean(colorError) || isSavingBranding}

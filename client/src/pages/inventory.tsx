@@ -41,6 +41,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
 import { useOrganization } from "@/hooks/use-organization";
+import { useImportExportGate } from "@/hooks/use-import-export-gate";
 import { ReadOnlyNotice } from "@/components/read-only-notice";
 import { friendlyWriteError } from "@/lib/db-errors";
 import {
@@ -192,6 +193,7 @@ const loadSavedViewMode = (): ViewMode => {
 export default function InventoryPage() {
   const { user } = useAuth();
   const { canEdit } = useOrganization();
+  const gateImportExport = useImportExportGate();
   /** This organization's labels, hidden fields and custom fields for inventory. */
   const fields = useTrackerFields("inventory_items");
   /** Import window (CSV or Excel). */
@@ -640,7 +642,7 @@ export default function InventoryPage() {
           </div>
           {canEdit && (
             <>
-              <Button variant="outline" onClick={() => setShowImport(true)}>
+              <Button variant="outline" onClick={gateImportExport(() => setShowImport(true))}>
                 <Upload className="mr-1 h-4 w-4" aria-hidden="true" /> Import
               </Button>
               <Button onClick={openCreate}>

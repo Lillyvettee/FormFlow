@@ -40,6 +40,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
 import { useOrganization } from "@/hooks/use-organization";
+import { useImportExportGate } from "@/hooks/use-import-export-gate";
 import { ReadOnlyNotice } from "@/components/read-only-notice";
 import { friendlyWriteError } from "@/lib/db-errors";
 import {
@@ -188,6 +189,7 @@ const loadCollapsed = (): Set<string> => {
 export default function LinksPage() {
   const { user } = useAuth();
   const { canEdit } = useOrganization();
+  const gateImportExport = useImportExportGate();
   /** Import window (CSV or Excel). */
   const [showImport, setShowImport] = useState(false);
   const { toast } = useToast();
@@ -674,7 +676,7 @@ export default function LinksPage() {
                   <FolderPlus className="mr-1 h-4 w-4" aria-hidden="true" /> New folder
                 </Button>
               )}
-              <Button variant="outline" onClick={() => setShowImport(true)}>
+              <Button variant="outline" onClick={gateImportExport(() => setShowImport(true))}>
                 <Upload className="mr-1 h-4 w-4" aria-hidden="true" /> Import
               </Button>
               <Button onClick={() => openCreate()}>

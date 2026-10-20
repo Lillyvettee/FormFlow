@@ -4,7 +4,7 @@
 // Starts a Stripe Checkout for the caller's organization and returns its URL.
 // Called from the Plan section in Settings.
 //
-// Body: { plan: "starter" | "mission" }
+// Body: { plan: "starter" | "mission", cycle: "monthly" | "yearly" }
 //
 // - Owners and admins only.
 // - Free trial days left over (more than 2) carry into the subscription, so
@@ -20,10 +20,10 @@ const MIN_TRIAL_SECONDS = 2 * 24 * 60 * 60;
 
 serve(async (req) => {
   const caller = await getBillingAdmin(req);
-  const { plan } = await req.json().catch(() => ({}));
+  const { plan, cycle } = await req.json().catch(() => ({}));
 
-  const priceId = priceIdForPlan(plan);
-  if (!priceId) throw new UserError("Choose Starter or Mission.");
+  const priceId = priceIdForPlan(plan, cycle);
+  if (!priceId) throw new UserError("Choose Starter or Mission, billed monthly or yearly.");
 
   const { data: billing, error: billingError } = await admin
     .from("organization_billing")

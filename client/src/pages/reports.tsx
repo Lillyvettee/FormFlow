@@ -67,6 +67,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
 import { useOrganization } from "@/hooks/use-organization";
+import { useImportExportGate } from "@/hooks/use-import-export-gate";
 import { useToast } from "@/hooks/use-toast";
 import {
   answerFields,
@@ -215,6 +216,7 @@ const writeViewToUrl = (v: ViewState) => {
 export default function ReportsPage() {
   const { user } = useAuth();
   const { organization, branding } = useOrganization();
+  const gateImportExport = useImportExportGate();
   const { toast } = useToast();
 
   // ----- View (kept in the address) -----
@@ -834,7 +836,7 @@ export default function ReportsPage() {
     downloadCsv(exportFileName([orgName, label], "csv"), rows);
   };
 
-  const exportPDF = () => {
+  const exportPDF = async () => {
     if (!canExport) return;
     const stat = (label: string, value: string, cur?: number, prev?: number | null): PdfStat => {
       const c = cur == null ? null : percentChange(cur, prev);
@@ -1055,16 +1057,40 @@ export default function ReportsPage() {
       reportType === "inventory"
         ? "Current stock levels"
         : `${periodLabel}${previous ? ` · compared with ${describePeriod(previous.from, previous.to)}` : ""}`;
-    const opened = openPrintableReport({
-      title,
-      periodLine,
-      orgName,
-      logoUrl: branding.logoUrl,
-      brandColor: branding.primaryColor,
-      highlights: highlights(),
-      body,
-      chartsRoot: panelRef.current,
-    });
+    // Each PDF counts toward the plan's monthly reports (use_report_export, migration 016).
+    // Set inside beforeWrite; the cast stops TypeScript assuming it stays null.
+    let reportsLeft = null as number | null;
+    let opened: boolean;
+    try {
+      opened = await openPrintableReport({
+        title,
+        periodLine,
+        orgName,
+        logoUrl: branding.logoUrl,
+        brandColor: branding.primaryColor,
+        highlights: highlights(),
+        body,
+        chartsRoot: panelRef.current,
+        beforeWrite: async () => {
+          const { data, error } = await supabase.rpc("use_report_export");
+          if (error) throw new Error(error.message);
+          reportsLeft = data as number | null;
+        },
+      });
+    } catch (err) {
+      toast({
+        title: "Couldn't export the PDF",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (opened && reportsLeft !== null && reportsLeft <= 5) {
+      toast({
+        title: `${reportsLeft} PDF ${reportsLeft === 1 ? "report" : "reports"} left this month`,
+        description: "Your plan's reports reset on the 1st. Upgrade in Settings > Plan for more.",
+      });
+    }
     if (!opened) {
       toast({ title: "Pop-up blocked", description: "Allow pop-ups for this site to export a PDF, then try again.", variant: "destructive" });
     }
@@ -1117,7 +1143,7 @@ export default function ReportsPage() {
           <Button variant="outline" size="sm" onClick={() => setShowFunderPortals(true)}>
             <Share2 className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> Funder portals
           </Button>
-          <Button variant="outline" size="sm" onClick={exportCSV} disabled={!canExport}>
+          <Button variant="outline" size="sm" onClick={gateImportExport(exportCSV)} disabled={!canExport}>
             <Download className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> CSV
           </Button>
           <Button size="sm" onClick={exportPDF} disabled={!canExport}>

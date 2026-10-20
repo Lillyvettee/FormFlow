@@ -12,8 +12,11 @@
  *             delete buttons from viewers and from read-only organizations.
  *   isAdmin   true for owners and admins. Use it for team and settings controls.
  *   billing   trial and subscription details (see Billing below).
+ *   plan      the plan whose limits and features apply (lib/plans):
+ *             the subscribed plan, or Mission during the free trial.
  *   branding  the organization's color and logo from Settings > Branding.
  *             The color is applied to the whole app here (lib/brand-color).
+ *             Empty on plans without custom branding.
  *
  * These flags only control what the UI shows. The database security rules
  * enforce the same permissions, so hiding a button is a convenience, not
@@ -24,6 +27,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
 import { setBrandColor } from "@/lib/brand-color";
+import { PLANS, type PlanId, type PlanInfo } from "@/lib/plans";
 
 // ===========================================================================
 // Types and role metadata
@@ -41,7 +45,7 @@ export interface OrganizationBilling {
   trial_ends_at: string;
   /** Stripe's subscription status, or null if never subscribed. */
   status: string | null;
-  plan: "starter" | "mission" | null;
+  plan: PlanId | null;
   current_period_end: string | null;
   cancel_at_period_end: boolean;
 }
@@ -76,6 +80,12 @@ function describeBilling(details: OrganizationBilling | null): Billing {
   return { details, isSubscribed, isOnTrial, trialDaysLeft, hasAccess: isSubscribed || isOnTrial };
 }
 
+/** Mirrors org_plan() in the database (migration 016), which is what enforces the limits. */
+function effectivePlan(billing: Billing): PlanInfo {
+  if (billing.isSubscribed) return PLANS[billing.details?.plan ?? "starter"];
+  return PLANS.mission;
+}
+
 /** Display names for roles. */
 export const ROLE_LABELS: Record<OrgRole, string> = {
   owner: "Owner",
@@ -96,6 +106,8 @@ interface OrganizationContextValue {
   organization: Organization | null;
   role: OrgRole | null;
   billing: Billing;
+  /** The plan whose limits and features apply. */
+  plan: PlanInfo;
   branding: Branding;
   isLoading: boolean;
   error: string | null;
@@ -187,10 +199,18 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback(() => load({ silent: true }), [load]);
 
+  const billing = useMemo(() => describeBilling(billingDetails), [billingDetails]);
+  const plan = effectivePlan(billing);
+  // Saved branding stays in the database but isn't shown on plans without it.
+  const shownBranding = useMemo<Branding>(
+    () => (plan.features.branding ? branding : { primaryColor: null, logoUrl: null }),
+    [plan.features.branding, branding],
+  );
+
   // Theme the app with the organization's color; signing out restores the default.
   useEffect(() => {
-    setBrandColor("organization", branding.primaryColor);
-  }, [branding.primaryColor]);
+    setBrandColor("organization", shownBranding.primaryColor);
+  }, [shownBranding.primaryColor]);
 
   const createOrganization = useCallback(
     async (name: string) => {
@@ -202,12 +222,12 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo<OrganizationContextValue>(() => {
-    const billing = describeBilling(billingDetails);
     return {
       organization,
       role,
       billing,
-      branding,
+      plan,
+      branding: shownBranding,
       isLoading,
       error,
       canEdit: billing.hasAccess && (role === "owner" || role === "admin" || role === "member"),
@@ -216,7 +236,7 @@ export function OrganizationProvider({ children }: { children: ReactNode }) {
       refresh,
       createOrganization,
     };
-  }, [organization, role, billingDetails, branding, isLoading, error, refresh, createOrganization]);
+  }, [organization, role, billing, plan, shownBranding, isLoading, error, refresh, createOrganization]);
 
   return <OrganizationContext.Provider value={value}>{children}</OrganizationContext.Provider>;
 }

@@ -49,6 +49,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
 import { useOrganization } from "@/hooks/use-organization";
+import { useImportExportGate } from "@/hooks/use-import-export-gate";
 import { ReadOnlyNotice } from "@/components/read-only-notice";
 import { friendlyWriteError } from "@/lib/db-errors";
 import {
@@ -376,6 +377,7 @@ export default function VolunteerHoursPage() {
   const [showImport, setShowImport] = useState(false);
   /** False for viewers and for read-only organizations; hides add/edit/delete controls. */
   const { canEdit } = useOrganization();
+  const gateImportExport = useImportExportGate();
   /** The organization's field names, hidden fields, split names and own fields. */
   const fields = useTrackerFields("volunteer_hours");
   const showActivity = fields.shows("activity");
@@ -886,10 +888,10 @@ export default function VolunteerHoursPage() {
           {/* Exports use the filtered list, so they are disabled when filters hide everything. */}
           {records.length > 0 && (
             <>
-              <Button variant="outline" onClick={exportSummary} disabled={filtered.length === 0}>
+              <Button variant="outline" onClick={gateImportExport(exportSummary)} disabled={filtered.length === 0}>
                 <FileText className="mr-1 h-4 w-4" aria-hidden="true" /> Summary report
               </Button>
-              <Button variant="outline" onClick={exportDetail} disabled={filtered.length === 0}>
+              <Button variant="outline" onClick={gateImportExport(exportDetail)} disabled={filtered.length === 0}>
                 <Download className="mr-1 h-4 w-4" aria-hidden="true" /> Export CSV
               </Button>
             </>
@@ -897,7 +899,7 @@ export default function VolunteerHoursPage() {
           <CustomizeFieldsButton fields={fields} />
           {canEdit && (
             <>
-              <Button variant="outline" onClick={() => setShowImport(true)}>
+              <Button variant="outline" onClick={gateImportExport(() => setShowImport(true))}>
                 <Upload className="mr-1 h-4 w-4" aria-hidden="true" /> Import
               </Button>
               <Button onClick={openCreate}>

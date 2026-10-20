@@ -31,11 +31,12 @@ export default function RefundsPage() {
 
       <Section title="2. Plans and automatic renewal">
         <ul>
-          <li><strong>Starter</strong>: $5 per month, billed monthly.</li>
-          <li><strong>Mission</strong>: $36 per year, billed yearly.</li>
+          <li><strong>Starter</strong>: $49 per month, or $470 per year.</li>
+          <li><strong>Mission</strong>: $199 per month, or $1,910 per year.</li>
+          <li><strong>Enterprise</strong>: priced by agreement; its billing terms are set in that agreement.</li>
         </ul>
         <p>
-          Both plans renew automatically at the end of each billing period until you cancel. Stripe sends a receipt for
+          Starter and Mission renew automatically at the end of each billing period until you cancel. Stripe sends a receipt for
           each charge.
         </p>
       </Section>
@@ -58,7 +59,7 @@ export default function RefundsPage() {
             where the law requires it.
           </li>
           <li>
-            <strong>Mission (yearly) renewals.</strong> If your yearly plan renews and you didn't mean to keep it, ask for
+            <strong>Yearly renewals.</strong> If your yearly plan renews and you didn't mean to keep it, ask for
             a refund within <strong>14 days of the renewal charge</strong> and we'll refund that charge in full and
             cancel the subscription.
           </li>

@@ -3,7 +3,7 @@
 //
 // Secrets:
 //   RESEND_API_KEY   re_...
-//   NOTIFY_FROM      the sender, e.g. "HumMotion <billing@yourdomain.com>".
+//   NOTIFY_FROM      the sender, e.g. "HumMotion <info@hummotion.com>".
 //                    Optional for alerts to yourself; required for emails
 //                    to customers (see hasCustomerSender).
 // ============================================================
