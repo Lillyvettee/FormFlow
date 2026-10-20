@@ -56,10 +56,11 @@ describe("plan limits and features", () => {
     expect(Object.values(PLANS.enterprise.limits).every((v) => v === null)).toBe(true);
   });
 
-  it("leaves import, export and branding out of Starter only", () => {
-    expect(PLANS.starter.features).toEqual({ importExport: false, branding: false });
-    expect(PLANS.mission.features).toEqual({ importExport: true, branding: true });
-    expect(PLANS.enterprise.features).toEqual({ importExport: true, branding: true });
+  it("leaves import, export, branding, advanced funder portals and scanning out of Starter only", () => {
+    const all = { importExport: true, branding: true, funderAdvanced: true, cardsScanning: true };
+    expect(PLANS.starter.features).toEqual({ importExport: false, branding: false, funderAdvanced: false, cardsScanning: false });
+    expect(PLANS.mission.features).toEqual(all);
+    expect(PLANS.enterprise.features).toEqual(all);
   });
 
   it("lists plans from smallest to largest", () => {

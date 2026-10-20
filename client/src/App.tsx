@@ -72,6 +72,8 @@ import PrivacyPage from "@/pages/privacy";
 import RefundsPage from "@/pages/refunds";
 import EnterprisePage from "@/pages/enterprise";
 import AdminInboxPage from "@/pages/admin-inbox";
+import ScanPage from "@/pages/scan";
+import { PrintCardsPage, PrintLabelsPage } from "@/pages/print-sheets";
 
 // ===========================================================================
 // Signed-in area
@@ -95,6 +97,15 @@ function AuthenticatedRouter() {
       <Route path="/settings" component={SettingsPage} />
       <Route path="/feedback" component={FeedbackPage} />
       <Route path="/admin" component={AdminInboxPage} />
+      <Route path="/scan">
+        <ScanPage />
+      </Route>
+      <Route path="/scan/person/:id">
+        <ScanPage kind="person" />
+      </Route>
+      <Route path="/scan/item/:id">
+        <ScanPage kind="item" />
+      </Route>
       <Route path="/forms/:id/submit" component={SubmitFormPage} />
       {/* Old bookmarks or links to /dashboard land on the dashboard. */}
       <Route path="/dashboard">
@@ -151,6 +162,10 @@ function UnauthenticatedRouter() {
       <Route path="/forms/:id/submit" component={SubmitFormPage} />
       {/* The landing page footer links "Contact" here; the page supports signed-out visitors. */}
       <Route path="/feedback" component={FeedbackPage} />
+      {/* Printed QR codes (cards, labels) opened while signed out: sign in, then come back. */}
+      <Route path="/scan/*">
+        <Redirect to={`/login?${new URLSearchParams({ redirect: window.location.pathname })}`} replace />
+      </Route>
       <Route component={LandingPage} />
     </Switch>
   );
@@ -196,6 +211,9 @@ function AppContent() {
       <Route path="/privacy" component={PrivacyPage} />
       <Route path="/refunds" component={RefundsPage} />
       <Route path="/enterprise" component={EnterprisePage} />
+      {/* Print sheets for ID cards and inventory labels (signed in only). */}
+      <Route path="/print/cards">{user ? <PrintCardsPage /> : <Redirect to="/login?redirect=%2Fpeople" replace />}</Route>
+      <Route path="/print/labels">{user ? <PrintLabelsPage /> : <Redirect to="/login?redirect=%2Finventory" replace />}</Route>
 
       {/* Signed-in users go to the dashboard instead of seeing login/signup.
           Each page also honors ?redirect=, which is how invite links send

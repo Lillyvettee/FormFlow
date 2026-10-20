@@ -146,6 +146,10 @@ export interface Person {
   last_name?: string | null
   /** Values of the organization's own fields (migration 011). */
   custom?: Record<string, unknown>
+  /** ID card (migration 022): number within the organization, and the form its QR code opens. */
+  card_number?: number | null
+  card_form_id?: string | null
+  card_issued_at?: string | null
 }
 
 export interface Link {
@@ -172,6 +176,8 @@ export interface InventoryItem {
   notes: string | null
   created_at: string
   updated_at: string
+  /** Product barcode or our own label's code (migration 022). */
+  barcode?: string | null
 }
 
 export interface OrganizationSettings {

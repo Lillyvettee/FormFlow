@@ -28,6 +28,10 @@ export interface PlanLimits {
 export interface PlanFeatures {
   importExport: boolean;
   branding: boolean;
+  /** Funder portal filters, section notes, expiry dates and passwords. */
+  funderAdvanced: boolean;
+  /** ID cards for people, inventory barcodes and the Scan page. */
+  cardsScanning: boolean;
 }
 
 export interface PlanInfo {
@@ -55,7 +59,7 @@ export const PLANS: Record<PlanId, PlanInfo> = {
     monthlyPrice: 49,
     yearlyPrice: 470,
     limits: { forms: 50, members: 2, people: 200, reports: 50 },
-    features: { importExport: false, branding: false },
+    features: { importExport: false, branding: false, funderAdvanced: false, cardsScanning: false },
     highlights: [
       "50 active forms",
       "2 team members",
@@ -71,7 +75,7 @@ export const PLANS: Record<PlanId, PlanInfo> = {
     monthlyPrice: 199,
     yearlyPrice: 1910,
     limits: { forms: 100, members: 10, people: 500, reports: 100 },
-    features: { importExport: true, branding: true },
+    features: { importExport: true, branding: true, funderAdvanced: true, cardsScanning: true },
     highlights: [
       "100 active forms",
       "10 team members",
@@ -80,6 +84,8 @@ export const PLANS: Record<PlanId, PlanInfo> = {
       "100 PDF reports a month",
       "CSV and Excel import and export",
       "Custom branding",
+      "Advanced funder portals",
+      "ID cards and barcode scanning",
     ],
   },
   enterprise: {
@@ -89,7 +95,7 @@ export const PLANS: Record<PlanId, PlanInfo> = {
     monthlyPrice: null,
     yearlyPrice: null,
     limits: { forms: null, members: null, people: null, reports: null },
-    features: { importExport: true, branding: true },
+    features: { importExport: true, branding: true, funderAdvanced: true, cardsScanning: true },
     highlights: [
       "Everything in Mission",
       "Unlimited forms",

@@ -44,6 +44,8 @@ import { ResponseDialog } from "@/components/reports/form-report";
 import { PersonServices } from "@/components/people/person-services";
 import { PersonCaseNotes } from "@/components/people/person-case-notes";
 import { PersonHistory } from "@/components/people/person-history";
+import { PersonIdCard } from "@/components/people/person-card";
+import { BulkCardsDialog } from "@/components/people/bulk-cards-dialog";
 import { PEOPLE_ACCESS_OPTIONS, usePeopleAccess, type PeopleAccess } from "@/lib/people-access";
 import { Lock } from "lucide-react";
 import { CustomFieldInputs, SplitNameInputs } from "@/components/custom-field-inputs";
@@ -66,6 +68,7 @@ import {
   Check,
   Copy,
   ExternalLink,
+  IdCard,
   Link2,
   Minus,
   Pencil,
@@ -402,7 +405,7 @@ function PersonDialog({
 // ===========================================================================
 
 export default function PeoplePage() {
-  const { canEdit } = useOrganization();
+  const { canEdit, plan } = useOrganization();
   const fields = useTrackerFields("people");
   const peopleAccess = usePeopleAccess();
   const { toast } = useToast();
@@ -414,6 +417,7 @@ export default function PeoplePage() {
   const [status, setStatus] = useState<string>("active");
   const [program, setProgram] = useState<string>(ALL);
   const [adding, setAdding] = useState(false);
+  const [showCards, setShowCards] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -498,6 +502,11 @@ export default function PeoplePage() {
             />
           )}
           {state === "ready" && <CustomizeFieldsButton fields={fields} />}
+          {state === "ready" && plan.features.cardsScanning && people.length > 0 && (
+            <Button variant="outline" onClick={() => setShowCards(true)}>
+              <IdCard className="mr-1 h-4 w-4" aria-hidden="true" /> ID cards
+            </Button>
+          )}
           {canEdit && state === "ready" && (
             <Button onClick={() => setAdding(true)}>
               <Plus className="mr-1 h-4 w-4" aria-hidden="true" /> Add person
@@ -508,6 +517,16 @@ export default function PeoplePage() {
 
       <ReadOnlyNotice />
       {state === "ready" && <PlanLimitNotice resource="people" used={people.length} />}
+      {showCards && (
+        <BulkCardsDialog
+          people={people}
+          onClose={() => setShowCards(false)}
+          onIssued={() => {
+            setShowCards(false);
+            load();
+          }}
+        />
+      )}
 
       {!peopleAccess.isLoading && !peopleAccess.canView ? (
         <RestrictedNotice />
@@ -909,6 +928,8 @@ export function PersonPage() {
           </>
         )}
       </Card>
+
+      <PersonIdCard person={person} forms={forms} onChange={load} />
 
       <PersonServices personId={person.id} personName={person.full_name} />
 

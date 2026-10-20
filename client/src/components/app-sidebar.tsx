@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, Link } from "wouter";
-import { LayoutDashboard, FileText, BarChart3, LinkIcon, Package, Settings, LogOut, Image, MessageSquare, DollarSign, Clock, Users, Inbox } from "lucide-react";
+import { LayoutDashboard, FileText, BarChart3, LinkIcon, Package, Settings, LogOut, Image, MessageSquare, DollarSign, Clock, Users, Inbox, ScanLine } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useOrganization } from "@/hooks/use-organization";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -34,6 +34,7 @@ const phase2Items = [
   { title: "Donations", url: "/donations", icon: DollarSign },
   { title: "Volunteer Hours", url: "/volunteer-hours", icon: Clock },
   { title: "People", url: "/people", icon: Users },
+  { title: "Scan", url: "/scan", icon: ScanLine },
 ];
 
 const bottomItems = [

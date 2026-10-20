@@ -58,7 +58,11 @@ import {
   Tag,
   Search,
   Upload,
+  Printer,
+  ScanLine,
 } from "lucide-react";
+import { BarcodeScanDialog } from "@/components/barcode-scan-dialog";
+import { parseScan } from "@/lib/cards";
 import { ImportDialog } from "@/components/import-dialog";
 import { CustomizeFieldsButton } from "@/components/customize-fields-dialog";
 import { CustomFieldInputs } from "@/components/custom-field-inputs";
@@ -192,7 +196,9 @@ const loadSavedViewMode = (): ViewMode => {
 
 export default function InventoryPage() {
   const { user } = useAuth();
-  const { canEdit } = useOrganization();
+  const { canEdit, plan } = useOrganization();
+  /** Barcodes, labels and the Scan page are Mission and Enterprise (migration 022). */
+  const canScan = plan.features.cardsScanning;
   const gateImportExport = useImportExportGate();
   /** This organization's labels, hidden fields and custom fields for inventory. */
   const fields = useTrackerFields("inventory_items");
@@ -227,6 +233,9 @@ export default function InventoryPage() {
   const [condition, setCondition] = useState("good");
   const [location, setLocation] = useState("");
   const [notes, setNotes] = useState("");
+  const [barcode, setBarcode] = useState("");
+  /** Camera window for filling in the Barcode field. */
+  const [scanningBarcode, setScanningBarcode] = useState(false);
   /** Values for the organization's own fields, keyed by field id. */
   const [customValues, setCustomValues] = useState<CustomValues>({});
   const [customErrors, setCustomErrors] = useState<Record<string, string>>({});
@@ -300,6 +309,7 @@ export default function InventoryPage() {
     setCondition("good");
     setLocation("");
     setNotes("");
+    setBarcode("");
     setCustomValues({});
     setCustomErrors({});
     setEditingItem(null);
@@ -324,6 +334,7 @@ export default function InventoryPage() {
     setCondition(item.condition ?? "good");
     setLocation(item.location ?? "");
     setNotes(item.notes ?? "");
+    setBarcode(item.barcode ?? "");
     setCustomValues({ ...customOf(item as ItemWithThreshold) });
     setCustomErrors({});
     setShowDialog(true);
@@ -390,13 +401,20 @@ export default function InventoryPage() {
       if (fields.shows("low_stock_threshold")) payload.low_stock_threshold = Number(thresholdText);
       else if (!editingItem) payload.low_stock_threshold = DEFAULT_LOW_STOCK_THRESHOLD;
       if (fields.isAvailable) payload.custom = prepared.values;
+      // Only sent on plans with scanning, so other plans can still edit items that have one.
+      if (canScan) payload.barcode = barcode.trim() || null;
 
       const { error } = editingItem
         ? await supabase.from("inventory_items").update(payload).eq("id", editingItem.id)
         : await supabase.from("inventory_items").insert({ ...payload, user_id: user.id });
 
       if (error) {
-        toast({ title: "Could not save item", description: friendlyWriteError(error), variant: "destructive" });
+        const duplicateBarcode = error.code === "23505" && /barcode/.test(error.message ?? "");
+        toast({
+          title: "Could not save item",
+          description: duplicateBarcode ? "Another item already has this barcode." : friendlyWriteError(error),
+          variant: "destructive",
+        });
         return;
       }
 
@@ -548,6 +566,7 @@ export default function InventoryPage() {
           fields.shows("category") ? item.category : null,
           fields.shows("location") ? item.location : null,
           fields.shows("notes") ? item.notes : null,
+          item.barcode,
           ...fields.custom.map((f) => formatCustomValue(f, custom[f.id])),
         ].some((field) => field?.toLowerCase().includes(q));
       const matchesStock =
@@ -640,6 +659,13 @@ export default function InventoryPage() {
               </Button>
             ))}
           </div>
+          {canScan && items.length > 0 && (
+            <Button asChild variant="outline">
+              <a href="/print/labels?all=1" target="_blank" rel="noopener noreferrer">
+                <Printer className="mr-1 h-4 w-4" aria-hidden="true" /> Print labels
+              </a>
+            </Button>
+          )}
           {canEdit && (
             <>
               <Button variant="outline" onClick={gateImportExport(() => setShowImport(true))}>
@@ -1230,6 +1256,52 @@ export default function InventoryPage() {
                     <option key={l} value={l} />
                   ))}
                 </datalist>
+              </div>
+            )}
+
+            {/* Barcode: a product's own (UPC/EAN), typed or scanned with a USB scanner. */}
+            {canScan && (
+              <div className="space-y-2">
+                <Label htmlFor="item-barcode">
+                  Barcode <span className="text-muted-foreground font-normal">(optional)</span>
+                </Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="item-barcode"
+                    placeholder="e.g. 036000291452"
+                    value={barcode}
+                    onChange={(e) => setBarcode(e.target.value)}
+                    maxLength={128}
+                    className="font-mono"
+                    aria-describedby="item-barcode-help"
+                  />
+                  <Button type="button" variant="outline" onClick={() => setScanningBarcode(true)}>
+                    <ScanLine className="mr-1 h-4 w-4" aria-hidden="true" /> Scan
+                  </Button>
+                </div>
+                {scanningBarcode && (
+                  <BarcodeScanDialog
+                    onClose={() => setScanningBarcode(false)}
+                    onScanned={(code) => {
+                      // A scanned HumMotion label is a link to an item, not a product barcode.
+                      if (parseScan(code)?.kind === "barcode") {
+                        setBarcode(code.slice(0, 128));
+                        toast({ title: "Barcode added", description: code });
+                      } else {
+                        toast({
+                          title: "That's a HumMotion label",
+                          description: "Labels already find their item. Scan the product's own barcode instead.",
+                          variant: "destructive",
+                        });
+                      }
+                      setScanningBarcode(false);
+                    }}
+                  />
+                )}
+                <p id="item-barcode-help" className="text-xs text-muted-foreground">
+                  Scan it with the camera, or type the number under the barcode. Items without one can use a printed label instead
+                  (Print labels).
+                </p>
               </div>
             )}
 

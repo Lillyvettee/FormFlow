@@ -36,6 +36,9 @@ In the Supabase dashboard, open **SQL Editor** and run each file, in order:
 14. `supabase/migrations/017_feedback_and_staff_inbox.sql` (the feedback table, and the staff-only Inbox at /admin)
 15. `supabase/migrations/018_join_with_existing_organization.sql` (accepting an invitation when you already have your own organization; also deploy `join-organization` in step 4)
 16. `supabase/migrations/019_media_bucket.sql` (creates the "media" storage bucket used by the Media library and form logos; fixes "Bucket not found")
+17. `supabase/migrations/020_funder_portal_options.sql` (edit funder links; on Mission and Enterprise: filters, section order and notes, branding, expiry dates and passwords)
+18. `supabase/migrations/021_restore_form_access_rules.sql` (puts back the access rules for forms and responses; fixes "Form not found" and empty form lists if they were removed)
+19. `supabase/migrations/022_id_cards_and_scanning.sql` (ID cards for people, inventory barcodes and the Scan page; Mission and Enterprise)
 
 `005_trial_reminders.sql` comes later, in step 6.
 
@@ -215,6 +218,8 @@ Then:
 
   To end it, set `status = 'canceled'`.
 - **Joining a team when you already have an organization:** everyone creates an organization at sign-up, and each person belongs to one. If someone who is the only member of their own organization opens an invitation, the invite page lets them bring their records into the new team (blocked if it would put the team over its plan's form or client profile limits; sample data stays behind) or delete their old organization. Either way its subscription is canceled at once, then they join. If their organization has other members, they must make someone else an owner and leave it on the Team page first.
+- **Funder portals:** owners and admins create links in Reports > Funder portals. Every plan can set the name, note, period and sections, and edit a link later without changing its address. Mission and Enterprise can also filter what's counted (campaigns, volunteer activities, programs, forms, goals, outcome questions), reorder sections and add a note to each, show the organization's logo and color, set an expiry date, and add a password (stored only as a hash; 10 wrong tries lock the link for 15 minutes). Funders only ever see totals.
+- **ID cards and scanning (Mission and Enterprise):** on a person's page, **ID card** gives them a card number (your prefix + a number, e.g. `FB-000123`; owners and admins set the prefix there) and chooses the form that opens when the card is scanned. **People > ID cards** makes cards for everyone at once and prints them (ID-badge size, 10 per Letter page). Inventory items have a **Barcode** field for product barcodes, and **Inventory > Print labels** prints QR labels (Avery 5160). The **Scan** page uses the phone or tablet camera: a card opens its form linked to that person; an item adds stock (Receive) or removes it (Give out). Cards and labels hold only a link to `/scan/...`, which works only for signed-in members of the organization. Print at 100% scale. The camera needs `camera=(self)` in `vercel.json`, which is set.
 - **Staff Inbox:** `/admin` lists Enterprise requests and feedback, with Reply links and a "Mark handled" button. Only people whose confirmed email is in `staff_admins` can open it; it starts with info@hummotion.com. That account also needs to belong to an organization (any one) to get past sign-in. Add or remove staff in the SQL Editor:
 
   ```sql
