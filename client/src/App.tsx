@@ -71,6 +71,7 @@ import TermsPage from "@/pages/terms";
 import PrivacyPage from "@/pages/privacy";
 import RefundsPage from "@/pages/refunds";
 import EnterprisePage from "@/pages/enterprise";
+import AdminInboxPage from "@/pages/admin-inbox";
 
 // ===========================================================================
 // Signed-in area
@@ -93,6 +94,7 @@ function AuthenticatedRouter() {
       <Route path="/team" component={TeamPage} />
       <Route path="/settings" component={SettingsPage} />
       <Route path="/feedback" component={FeedbackPage} />
+      <Route path="/admin" component={AdminInboxPage} />
       <Route path="/forms/:id/submit" component={SubmitFormPage} />
       {/* Old bookmarks or links to /dashboard land on the dashboard. */}
       <Route path="/dashboard">

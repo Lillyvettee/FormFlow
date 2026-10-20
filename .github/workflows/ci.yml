@@ -1,0 +1,38 @@
+# Checks every push and pull request: types, tests and a production build of
+# the app in client/. A red X on GitHub means one of these failed; open the
+# run to see which step and why.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  client:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Type check
+        run: npm run check
+
+      - name: Tests
+        # Also checks the plan limits in client/src/lib/plans.ts against
+        # supabase/migrations/016_plans_and_limits.sql.
+        run: npm test
+
+      - name: Build
+        run: npx vite build

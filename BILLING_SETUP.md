@@ -33,6 +33,9 @@ In the Supabase dashboard, open **SQL Editor** and run each file, in order:
 11. `supabase/migrations/014_private_form_uploads.sql` (private storage for form photos and voice memos, and upload limits)
 12. `supabase/migrations/015_people_access_and_history.sql` (who can see People, and a change history for admins)
 13. `supabase/migrations/016_plans_and_limits.sql` (plan limits, monthly PDF report counts, Starter branding lock, Enterprise inquiries)
+14. `supabase/migrations/017_feedback_and_staff_inbox.sql` (the feedback table, and the staff-only Inbox at /admin)
+15. `supabase/migrations/018_join_with_existing_organization.sql` (accepting an invitation when you already have your own organization; also deploy `join-organization` in step 4)
+16. `supabase/migrations/019_media_bucket.sql` (creates the "media" storage bucket used by the Media library and form logos; fixes "Bucket not found")
 
 `005_trial_reminders.sql` comes later, in step 6.
 
@@ -61,6 +64,21 @@ Resend's built-in sender (`onboarding@resend.dev`) can only send to the address 
 
 Until `NOTIFY_FROM` is set, the reminder job runs but sends nothing. Its log says why.
 
+### Password reset email (required)
+
+Email security scanners (Outlook Safe Links on Microsoft 365, Mimecast and others) open every link in an email to check it. Supabase's default reset link works only once, so the scanner uses it up and the person sees "This reset link has expired". Change the template so the link only works after the person presses **Continue**:
+
+1. Supabase: **Authentication > Emails > Templates > Reset Password** (older dashboards: Authentication > Email Templates).
+2. Replace the link in the message body with:
+
+   ```html
+   <a href="{{ .SiteURL }}/reset-password?token_hash={{ .TokenHash }}&type=recovery">Reset your password</a>
+   ```
+
+3. **Authentication > URL Configuration**: set **Site URL** to the live site (e.g. `https://your-site.vercel.app`) and add `https://your-site.vercel.app/reset-password` under **Redirect URLs**.
+
+Old links already sitting in inboxes keep working until they expire.
+
 ## 4. Deploy the server functions
 
 In a terminal in this folder:
@@ -87,6 +105,7 @@ npx supabase functions deploy request-account-deletion
 npx supabase functions deploy confirm-account-deletion --no-verify-jwt
 npx supabase functions deploy form-notify --no-verify-jwt
 npx supabase functions deploy enterprise-inquiry --no-verify-jwt
+npx supabase functions deploy join-organization
 ```
 
 Enterprise requests are emailed to info@hummotion.com. To send them somewhere else, run `npx supabase secrets set ENTERPRISE_NOTIFY_TO=sales@example.org` (comma-separate several addresses).
@@ -150,6 +169,16 @@ If something fails, the error details are in **Supabase > Edge Functions > (func
 
 ## 8. Go live
 
+Before switching on live payments:
+
+- [ ] Fill in every `TODO` in `client/src/lib/legal.ts`: legal business name, mailing address, governing law and venue. Then set `LEGAL_DETAILS_COMPLETE = true`. Until then the legal pages log a warning in development.
+- [ ] Have a lawyer review the Terms, Privacy and Refund pages.
+- [ ] Verify hummotion.com in Resend and set `NOTIFY_FROM` (step 3), so Enterprise requests and customer emails are delivered.
+- [ ] Sign in as info@hummotion.com (with the email confirmed) and check that **Inbox** appears in the sidebar.
+- [ ] Check that the latest GitHub Actions run (the **CI** workflow) is green.
+
+Then:
+
 1. Switch Stripe to live mode. Then repeat step 2 (products, any coupons and promotion codes, portal), step 5 (webhook) and the API key.
 2. Run `npx supabase secrets set` again with the live `sk_live_...`, the new price IDs and the new `whsec_...`.
 
@@ -176,7 +205,7 @@ If something fails, the error details are in **Supabase > Edge Functions > (func
   | Custom branding (logo, colors, per-form appearance) | No | Yes | Yes |
 
   Yearly is 20% off twelve months, rounded down to whole dollars. During the free trial, organizations get Mission's limits. The database refuses new forms, people, invitations and PDF reports past the limit, and Starter organizations can't save branding. Nothing that already exists is removed when an organization moves to a smaller plan. Import and export are hidden from Starter in the app only, because they run in the browser. To change a limit, edit both `client/src/lib/plans.ts` and `plan_limit()` in a new migration.
-- **Enterprise:** the "Contact us" buttons open `/enterprise`. Each request is saved in **Table Editor > enterprise_inquiries** and emailed to info@hummotion.com. After you agree a price, bill them outside the app (an invoice, or a custom Stripe price), then turn the plan on in the SQL Editor:
+- **Enterprise:** the "Contact us" buttons open `/enterprise`. Each request is saved in **Table Editor > enterprise_inquiries**, emailed to info@hummotion.com, and listed in the in-app Inbox. After you agree a price, bill them outside the app (an invoice, or a custom Stripe price), then turn the plan on in the SQL Editor:
 
   ```sql
   update organization_billing set plan = 'enterprise', status = 'active'
@@ -185,3 +214,10 @@ If something fails, the error details are in **Supabase > Edge Functions > (func
   ```
 
   To end it, set `status = 'canceled'`.
+- **Joining a team when you already have an organization:** everyone creates an organization at sign-up, and each person belongs to one. If someone who is the only member of their own organization opens an invitation, the invite page lets them bring their records into the new team (blocked if it would put the team over its plan's form or client profile limits; sample data stays behind) or delete their old organization. Either way its subscription is canceled at once, then they join. If their organization has other members, they must make someone else an owner and leave it on the Team page first.
+- **Staff Inbox:** `/admin` lists Enterprise requests and feedback, with Reply links and a "Mark handled" button. Only people whose confirmed email is in `staff_admins` can open it; it starts with info@hummotion.com. That account also needs to belong to an organization (any one) to get past sign-in. Add or remove staff in the SQL Editor:
+
+  ```sql
+  insert into staff_admins (email) values ('someone@hummotion.com');
+  delete from staff_admins where email = 'someone@hummotion.com';
+  ```

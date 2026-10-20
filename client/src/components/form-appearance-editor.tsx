@@ -111,8 +111,9 @@ export function FormAppearanceEditor({
     if (fileRef.current) fileRef.current.value = ""; // allow picking the same file again
     setUploadError("");
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      setUploadError("Choose an image file (PNG, JPG, SVG or GIF).");
+    // SVG isn't accepted by storage (an SVG file can carry scripts).
+    if (!file.type.startsWith("image/") || file.type === "image/svg+xml") {
+      setUploadError("Choose a PNG, JPG, GIF or WebP image.");
       return;
     }
     if (file.size > MAX_LOGO_BYTES) {
@@ -194,7 +195,7 @@ export function FormAppearanceEditor({
         <input
           ref={fileRef}
           type="file"
-          accept="image/*"
+          accept="image/png,image/jpeg,image/gif,image/webp"
           className="hidden"
           tabIndex={-1}
           aria-hidden="true"

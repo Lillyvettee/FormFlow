@@ -92,6 +92,16 @@ export async function deleteAccount(userId: string): Promise<DeletionPlan> {
 /** Cancels billing, removes stored files, then deletes the organization and everything in it. */
 async function deleteOrganization(organizationId: string) {
   // 1. Stop charging first. If Stripe fails, nothing has been deleted yet.
+  await cancelOrganizationSubscription(organizationId);
+  // 2. Files: media library uploads and files attached to form responses.
+  await removeOrganizationFiles(organizationId);
+  // 3. The organization. Every data table cascades from it.
+  const { error } = await admin.from("organizations").delete().eq("id", organizationId);
+  if (error) throw error;
+}
+
+/** Cancels the organization's Stripe subscription right away, if it has a working one. */
+export async function cancelOrganizationSubscription(organizationId: string) {
   const { data: billing } = await admin
     .from("organization_billing")
     .select("stripe_subscription_id, status")
@@ -100,8 +110,14 @@ async function deleteOrganization(organizationId: string) {
   if (billing?.stripe_subscription_id && SUBSCRIBED_STATUSES.includes(billing.status)) {
     await stripe.subscriptions.cancel(billing.stripe_subscription_id);
   }
+}
 
-  // 2. Files: media library uploads and files attached to form responses.
+/**
+ * Removes the organization's media library uploads and files attached to
+ * form responses. A failure leaves orphaned files but doesn't throw, so it
+ * never blocks what the person asked for.
+ */
+export async function removeOrganizationFiles(organizationId: string) {
   const paths: string[] = [];
   const { data: media } = await admin.from("media_items").select("file_url").eq("organization_id", organizationId);
   for (const item of media ?? []) {
@@ -113,16 +129,11 @@ async function deleteOrganization(organizationId: string) {
     const { data: files } = await admin.storage.from(MEDIA_BUCKET).list(`public/${form.id}`, { limit: 1000 });
     for (const file of files ?? []) paths.push(`public/${form.id}/${file.name}`);
   }
-  // Storage accepts up to 1000 paths per call. A failure here leaves orphaned
-  // files but shouldn't stop the deletion the person asked for.
+  // Storage accepts up to 1000 paths per call.
   for (let i = 0; i < paths.length; i += 1000) {
     const { error } = await admin.storage.from(MEDIA_BUCKET).remove(paths.slice(i, i + 1000));
-    if (error) console.error("account deletion: couldn't remove some files", error);
+    if (error) console.error("couldn't remove some organization files", error);
   }
-
-  // 3. The organization. Every data table cascades from it.
-  const { error } = await admin.from("organizations").delete().eq("id", organizationId);
-  if (error) throw error;
 }
 
 // ------------------------------------------------------------

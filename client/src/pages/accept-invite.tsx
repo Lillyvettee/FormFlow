@@ -10,7 +10,10 @@
  *   - Signed out:                      who invited them, plus "Sign in" and
  *                                      "Create account" buttons that return here
  *   - Signed in with a different email: how to switch accounts
- *   - Signed in with the invited email: an "Accept" button
+ *   - Signed in with the invited email: an "Accept" button, or, if they
+ *                                      already have their own organization,
+ *                                      JoinWithExistingOrg (bring or delete
+ *                                      their records; migration 018)
  *
  * After accepting, they go to the dashboard as a member of the organization.
  */
@@ -23,6 +26,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { supabase } from "@/lib/supabase";
 import { useOrganization, ROLE_LABELS, ROLE_DESCRIPTIONS, type OrgRole } from "@/hooks/use-organization";
+import { JoinWithExistingOrg } from "@/components/join-with-existing-org";
 import { Users, AlertCircle, ArrowRight } from "lucide-react";
 
 /** Details returned by the get_invitation database function. */
@@ -213,6 +217,9 @@ export default function AcceptInvitePage() {
                 </div>
                 <p className="text-xs text-muted-foreground">Use {invite.email} when you sign up or sign in.</p>
               </div>
+            ) : emailMatches && organization ? (
+              // Signed in as the invited person, who already has an organization.
+              <JoinWithExistingOrg token={token} teamName={invite.organization_name} onPlainJoin={accept} />
             ) : emailMatches ? (
               // Signed in as the invited person.
               <Button className="w-full" onClick={accept} disabled={isAccepting}>

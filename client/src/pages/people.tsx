@@ -33,6 +33,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ReadOnlyNotice } from "@/components/read-only-notice";
+import { PlanLimitNotice } from "@/components/plan-limit-notice";
 import { useOrganization } from "@/hooks/use-organization";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
@@ -506,6 +507,7 @@ export default function PeoplePage() {
       </div>
 
       <ReadOnlyNotice />
+      {state === "ready" && <PlanLimitNotice resource="people" used={people.length} />}
 
       {!peopleAccess.isLoading && !peopleAccess.canView ? (
         <RestrictedNotice />

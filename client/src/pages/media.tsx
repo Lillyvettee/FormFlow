@@ -99,7 +99,17 @@ export default function MediaPage() {
         continue;
       }
 
-      const path = `${user.id}/${Date.now()}-${file.name}`;
+      // Storage rejects some characters in paths (Mac screenshot names contain a
+      // special space, for example), so the path uses a safe version of the
+      // name. The original name is still saved and shown.
+      const safeName =
+        file.name
+          .normalize("NFKD")
+          .replace(/[^\w.-]+/g, "-")
+          .replace(/-+/g, "-")
+          .replace(/^[-.]+|-+$/g, "")
+          .slice(-100) || "file";
+      const path = `${user.id}/${Date.now()}-${safeName}`;
       const { error: uploadError } = await supabase.storage.from("media").upload(path, file);
       if (uploadError) { toast({ title: "Upload failed", description: uploadError.message, variant: "destructive" }); continue; }
 

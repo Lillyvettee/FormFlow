@@ -36,6 +36,7 @@ import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/use-auth";
 import { useOrganization } from "@/hooks/use-organization";
 import { ReadOnlyNotice } from "@/components/read-only-notice";
+import { PlanLimitNotice } from "@/components/plan-limit-notice";
 import { friendlyWriteError } from "@/lib/db-errors";
 import { FormAppearanceEditor, appearanceErrors, type AppearanceDraft } from "@/components/form-appearance-editor";
 import { ShareFormDialog } from "@/components/share-form-dialog";
@@ -1157,6 +1158,7 @@ export default function FormsPage() {
       </div>
 
       <ReadOnlyNotice />
+      {!isLoading && <PlanLimitNotice resource="forms" used={forms.length} />}
 
       {/* ===== Form cards (or loading / empty states) ===== */}
       {isLoading ? (

@@ -96,6 +96,8 @@ export const PLANS: Record<PlanId, PlanInfo> = {
       "Unlimited team members",
       "Unlimited client profiles",
       "Unlimited PDF reports",
+      "Priority support",
+      "Onboarding and data migration help",
     ],
   },
 };

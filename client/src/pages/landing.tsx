@@ -6,7 +6,7 @@
  * Sections, top to bottom:
  *   1. Header       logo, section links, theme toggle, sign in / get started
  *   2. Hero         headline, calls to action, trust points, dashboard mockup
- *   3. Features     grid of eight product areas          (#features)
+ *   3. Features     grid of twelve product areas         (#features)
  *   4. Reports      report types and what they include  (#reports)
  *   5. Forms        special field types and sequences    (#forms)
  *   6. Pricing      Starter, Mission and Enterprise      (#pricing)
@@ -49,6 +49,10 @@ import {
   CheckCircle2,
   TrendingUp,
   Mic,
+  Users,
+  Target,
+  Share2,
+  UserPlus,
   type LucideIcon,
 } from "lucide-react";
 
@@ -80,7 +84,7 @@ const FEATURES: { icon: LucideIcon; title: string; desc: string; color: string }
   {
     icon: DollarSign,
     title: "Donation Log",
-    desc: "Record every donation with donor name, amount, campaign, and payment method. Visualize fundraising trends and export for grant reporting.",
+    desc: "Record every donation with donor name, amount, campaign, and payment method. Visualize fundraising trends and bring the totals straight into your grant reports.",
     color: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
   },
   {
@@ -112,6 +116,30 @@ const FEATURES: { icon: LucideIcon; title: string; desc: string; color: string }
     title: "Link Organizer",
     desc: "Save grant portals, partner websites, and resources in collapsible folders. Everything your team needs, always one click away.",
     color: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  },
+  {
+    icon: Users,
+    title: "Client Profiles",
+    desc: "Keep a profile for everyone you serve, with case notes, the help they've received, and warnings before you add a duplicate.",
+    color: "bg-teal-500/10 text-teal-600 dark:text-teal-400",
+  },
+  {
+    icon: Target,
+    title: "Impact Tracking",
+    desc: "Measure outcomes over time by linking form responses to each person, and see how the people you serve are progressing.",
+    color: "bg-lime-500/10 text-lime-700 dark:text-lime-400",
+  },
+  {
+    icon: Share2,
+    title: "Funder Report Links",
+    desc: "Share a live, read-only report with a funder or board member. No account needed on their side, and you can turn the link off anytime.",
+    color: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400",
+  },
+  {
+    icon: UserPlus,
+    title: "Team Accounts",
+    desc: "Invite staff and volunteers with the right role: admins, members who add records, or view-only access for board members.",
+    color: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
   },
   {
     icon: TrendingUp,

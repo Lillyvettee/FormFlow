@@ -40,6 +40,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/lib/supabase";
+import { PlanLimitNotice } from "@/components/plan-limit-notice";
 import { useOrganization, ROLE_LABELS, ROLE_DESCRIPTIONS, type OrgRole } from "@/hooks/use-organization";
 import { Users, UserPlus, Copy, Trash2, Link2, Building2, LogOut, Check } from "lucide-react";
 
@@ -341,6 +342,14 @@ export default function TeamPage() {
           Everyone on your team shares the same forms, donations, volunteer hours and other records.
         </p>
       </div>
+
+      {/* Open invitations count too, so only admins (who can see them) get the warning. */}
+      {isAdmin && !isLoading && (
+        <PlanLimitNotice
+          resource="members"
+          used={members.length + invitations.filter((inv) => new Date(inv.expires_at) > new Date()).length}
+        />
+      )}
 
       {loadError && (
         <Card role="alert" className="p-4 flex items-center justify-between gap-4 border-destructive/50">

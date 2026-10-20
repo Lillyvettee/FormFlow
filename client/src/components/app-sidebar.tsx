@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, Link } from "wouter";
-import { LayoutDashboard, FileText, BarChart3, LinkIcon, Package, Settings, LogOut, Image, MessageSquare, DollarSign, Clock, Users } from "lucide-react";
+import { LayoutDashboard, FileText, BarChart3, LinkIcon, Package, Settings, LogOut, Image, MessageSquare, DollarSign, Clock, Users, Inbox } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useOrganization } from "@/hooks/use-organization";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/sidebar";
 import { supabase } from "@/lib/supabase";
 import { usePeopleAccess } from "@/lib/people-access";
+import { useIsStaff } from "@/hooks/use-is-staff";
 
 const navItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
@@ -43,9 +44,12 @@ const bottomItems = [
 export function AppSidebar() {
   const [location] = useLocation();
   const { user } = useAuth();
-  const { organization, branding } = useOrganization();
+  const { branding } = useOrganization();
   // People is hidden for roles the organization doesn't let see it (migration 015).
   const { canView: canViewPeople } = usePeopleAccess();
+  // HumMotion staff also get the Inbox (migration 017).
+  const { isStaff } = useIsStaff();
+  const footerItems = isStaff ? [...bottomItems, { title: "Inbox", url: "/admin", icon: Inbox }] : bottomItems;
   // Fall back to the HumMotion logo if the organization's logo link is broken.
   const [logoFailed, setLogoFailed] = useState(false);
   useEffect(() => setLogoFailed(false), [branding.logoUrl]);
@@ -84,7 +88,7 @@ export function AppSidebar() {
             <AppLogo className="h-8 w-8" />
           )}
           <span className="font-semibold text-base tracking-tight truncate" data-testid="text-sidebar-title">
-            {organization?.name || "HumMotion"}
+            HumMotion
           </span>
         </div>
       </SidebarHeader>
@@ -129,7 +133,7 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {bottomItems.map((item) => (
+              {footerItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild isActive={isActive(item.url)}>
                     <Link href={item.url}>

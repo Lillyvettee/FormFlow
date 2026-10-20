@@ -5,9 +5,19 @@
  * Route: /reset-password, a full-page route outside the sidebar layout.
  *
  * Flow:
- *   1. The email link signs the person in for this one purpose. The Supabase
- *      client picks up the session from the URL by itself
- *      (detectSessionInUrl in lib/supabase.ts).
+ *   1. The email link brings ?token_hash=...&type=recovery (see the Reset
+ *      Password email template in BILLING_SETUP.md). Nothing is used up
+ *      until the person presses Continue, which calls verifyOtp and signs
+ *      them in for this one purpose.
+ *
+ *      Why the extra click: email security scanners (Outlook Safe Links,
+ *      Mimecast, ...) open every link in an email to check it. With the old
+ *      one-click link the scanner used up the one-time link first, and the
+ *      person got "expired". Scanners load pages but don't press buttons.
+ *
+ *      Links in the old format (#access_token=... from Supabase's default
+ *      template) still work: the Supabase client picks up the session from
+ *      the URL by itself (detectSessionInUrl in lib/supabase.ts).
  *   2. They choose a new password, checked against the same rules as sign-up.
  *   3. On success they go to the dashboard, already signed in.
  *
@@ -36,9 +46,19 @@ const linkErrorFromUrl = (): string | null => {
   return params.get("error_description") ?? params.get("error");
 };
 
+/** The one-time code from a link in the new format, if this is one. */
+const recoveryTokenFromUrl = (): string | null => {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("type") === "recovery" ? params.get("token_hash") : null;
+};
+
 export default function ResetPasswordPage() {
-  /** "checking" until we know whether the link signed someone in. */
-  const [linkState, setLinkState] = useState<"checking" | "valid" | "invalid">("checking");
+  /**
+   * "checking" until we know whether the link signed someone in;
+   * "confirm" while a new-format link waits for the Continue button.
+   */
+  const [linkState, setLinkState] = useState<"checking" | "confirm" | "valid" | "invalid">("checking");
+  const [isVerifying, setIsVerifying] = useState(false);
 
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -54,6 +74,10 @@ export default function ResetPasswordPage() {
       setLinkState("invalid");
       return;
     }
+    if (recoveryTokenFromUrl()) {
+      setLinkState("confirm");
+      return;
+    }
     let cancelled = false;
     // getSession waits for the client to finish reading the session from the URL.
     supabase.auth.getSession().then(({ data }) => {
@@ -63,6 +87,23 @@ export default function ResetPasswordPage() {
       cancelled = true;
     };
   }, []);
+
+  /** Continue: use the one-time code now that a person (not a scanner) clicked. */
+  const verifyLink = async () => {
+    const tokenHash = recoveryTokenFromUrl();
+    if (!tokenHash || isVerifying) return;
+    setIsVerifying(true);
+    try {
+      const { error: verifyError } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: "recovery" });
+      // Drop the used code from the address bar so a refresh doesn't retry it.
+      window.history.replaceState(null, "", window.location.pathname);
+      setLinkState(verifyError ? "invalid" : "valid");
+    } catch {
+      setError("Couldn't reach the server. Check your connection and try again.");
+    } finally {
+      setIsVerifying(false);
+    }
+  };
 
   // -------------------------------------------------------------------------
   // Save
@@ -116,11 +157,24 @@ export default function ResetPasswordPage() {
               <Skeleton className="h-9 w-full" />
               <Skeleton className="h-9 w-full" />
             </div>
+          ) : linkState === "confirm" ? (
+            <div className="space-y-4 text-center">
+              <p className="text-sm text-muted-foreground">Press Continue to choose your new password.</p>
+              {error && (
+                <p role="alert" className="text-sm text-destructive">
+                  {error}
+                </p>
+              )}
+              <Button className="w-full" onClick={verifyLink} disabled={isVerifying} data-testid="button-continue-reset">
+                {isVerifying ? "Checking link..." : "Continue"}
+              </Button>
+            </div>
           ) : linkState === "invalid" ? (
             <div className="space-y-4 text-center">
               <AlertCircle className="h-8 w-8 text-muted-foreground mx-auto" aria-hidden="true" />
               <p className="text-sm text-muted-foreground">
-                This reset link has expired or was already used. Links work once and only for a short time.
+                This reset link has expired or was already used. Links work once and only for a short time, so request
+                a new one and use the newest email.
               </p>
               <Button asChild className="w-full">
                 <a href="/forgot-password">Send a new link</a>
