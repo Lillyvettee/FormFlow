@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, Link } from "wouter";
-import { LayoutDashboard, FileText, BarChart3, LinkIcon, Package, Settings, LogOut, Image, MessageSquare, DollarSign, Clock, Users, Inbox, ScanLine, TrendingUp, Award, BookOpen } from "lucide-react";
+import { LayoutDashboard, FileText, BarChart3, LinkIcon, Package, Settings, LogOut, Image, DollarSign, Clock, Users, Inbox, ScanLine, TrendingUp, Award, BookOpen } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useOrganization } from "@/hooks/use-organization";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -43,10 +43,8 @@ const operationsItems = [
   { title: "SOPs", url: "/sops", icon: BookOpen },
 ];
 
-const bottomItems = [
-  { title: "Settings", url: "/settings", icon: Settings },
-  { title: "Feedback", url: "/feedback", icon: MessageSquare },
-];
+/** Pinned to the bottom of the sidebar, above the signed-in user. Feedback lives in Settings. */
+const bottomItems = [{ title: "Settings", url: "/settings", icon: Settings }];
 
 export function AppSidebar() {
   const [location] = useLocation();
@@ -155,25 +153,21 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {footerItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild isActive={isActive(item.url)}>
-                    <Link href={item.url}>
-                      <item.icon className="h-4 w-4" />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-      </SidebarContent>
+</SidebarContent>
 
       <SidebarFooter className="p-3">
+        <SidebarMenu>
+          {footerItems.map((item) => (
+            <SidebarMenuItem key={item.title}>
+              <SidebarMenuButton asChild isActive={isActive(item.url)}>
+                <Link href={item.url}>
+                  <item.icon className="h-4 w-4" />
+                  <span>{item.title}</span>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          ))}
+        </SidebarMenu>
         <div className="flex items-center gap-3 p-2 rounded-md">
           <Avatar className="h-8 w-8 shrink-0">
             <AvatarFallback className="text-xs bg-primary text-primary-foreground">

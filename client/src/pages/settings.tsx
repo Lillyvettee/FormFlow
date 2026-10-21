@@ -9,7 +9,8 @@
  *                 Everyone can see it; only owners and admins can change it.
  *   4. Plan       free trial, subscription and checkout (PlanSection)
  *   5. Account    email, organization, role and sign out
- *   6. Delete account (DeleteAccountSection; confirmed by email)
+ *   6. Feedback & contact (the Feedback page's form, embedded; #feedback)
+ *   7. Delete account (DeleteAccountSection; confirmed by email)
  *
  * Team accounts:
  *   The organization NAME has one home: the organizations table, edited on
@@ -50,8 +51,10 @@ import {
   AlertCircle,
   ImageOff,
   Users,
+  MessageSquare,
   type LucideIcon,
 } from "lucide-react";
+import FeedbackPage from "@/pages/feedback";
 
 // ===========================================================================
 // Constants
@@ -186,6 +189,10 @@ export default function SettingsPage() {
   const { toast } = useToast();
   const { user, logout } = useAuth();
   const { organization, role, isAdmin, plan, refresh: refreshOrganization } = useOrganization();
+  // Links to /settings#feedback arrive before the section exists, so scroll to it once it's rendered.
+  useEffect(() => {
+    if (window.location.hash === "#feedback") document.getElementById("feedback")?.scrollIntoView();
+  }, []);
   /** Custom logo and color are Mission and Enterprise features (the database enforces it too). */
   const canBrand = isAdmin && plan.features.branding;
 
@@ -868,6 +875,12 @@ export default function SettingsPage() {
             </Button>
           </div>
         </div>
+      </Card>
+
+      {/* ===== Feedback & contact ===== */}
+      <Card id="feedback" className="p-6 scroll-mt-20">
+        <SectionHeader icon={MessageSquare} title="Feedback & contact" description="Report a bug, suggest a feature, or just say hello" />
+        <FeedbackPage embedded />
       </Card>
 
       {/* ===== Delete account ===== */}

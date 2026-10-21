@@ -70,6 +70,7 @@ import {
   CheckSquare,
   TrendingUp,
   GitBranch,
+  Inbox,
   type LucideIcon,
 } from "lucide-react";
 import type { Form, FormField } from "@/types/database";
@@ -1243,6 +1244,13 @@ export default function FormsPage() {
                   <Button asChild variant="ghost" size="sm" data-testid={`button-fill-form-${form.id}`}>
                     <Link href={`/forms/${form.id}/submit`}>
                       <Send className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> Fill
+                    </Link>
+                  </Button>
+
+                  {/* Opens the Form responses report on this form, all time. */}
+                  <Button asChild variant="ghost" size="sm" data-testid={`button-responses-${form.id}`}>
+                    <Link href={`/reports?${new URLSearchParams({ tab: "forms", form: form.id, period: "all" })}`}>
+                      <Inbox className="mr-1 h-3.5 w-3.5" aria-hidden="true" /> Responses
                     </Link>
                   </Button>
 

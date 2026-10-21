@@ -100,7 +100,16 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Component
 // ---------------------------------------------------------------------------
 
-export default function FeedbackPage() {
+/** The form's card on its own page; just a plain block inside Settings' card. */
+function FormWrapper({ embedded, children }: { embedded: boolean; children: React.ReactNode }) {
+  return embedded ? <div>{children}</div> : <Card className="p-6">{children}</Card>;
+}
+
+/**
+ * embedded: shown inside Settings (Feedback & contact), which supplies the
+ * heading and card, so this leaves out its own page padding, title and card.
+ */
+export default function FeedbackPage({ embedded = false }: { embedded?: boolean }) {
   const { user } = useAuth();
   const { toast } = useToast();
 
@@ -215,7 +224,7 @@ export default function FeedbackPage() {
       // role="status" announces the confirmation to screen reader users.
       <div
         role="status"
-        className="p-6 max-w-2xl mx-auto flex flex-col items-center justify-center min-h-[60vh] space-y-4 text-center"
+        className={`flex flex-col items-center justify-center space-y-4 text-center ${embedded ? "py-6" : "p-6 max-w-2xl mx-auto min-h-[60vh]"}`}
       >
         <div className="h-16 w-16 rounded-full bg-chart-2/10 flex items-center justify-center">
           <CheckCircle2 className="h-8 w-8 text-chart-2" aria-hidden="true" />
@@ -237,12 +246,14 @@ export default function FeedbackPage() {
   // -------------------------------------------------------------------------
 
   return (
-    <div className="p-6 space-y-6 max-w-2xl mx-auto">
+    <div className={embedded ? "space-y-5" : "p-6 space-y-6 max-w-2xl mx-auto"}>
       {/* ===== Header ===== */}
-      <div className="space-y-1">
-        <h1 className="text-2xl font-serif font-bold">Feedback & Contact</h1>
-        <p className="text-muted-foreground">Report a bug, suggest a feature, or just say hello</p>
-      </div>
+      {!embedded && (
+        <div className="space-y-1">
+          <h1 className="text-2xl font-serif font-bold">Feedback & Contact</h1>
+          <p className="text-muted-foreground">Report a bug, suggest a feature, or just say hello</p>
+        </div>
+      )}
 
       {/* ===== Feedback type selector =====
           Exposed as a radio group so screen readers announce it as
@@ -272,7 +283,7 @@ export default function FeedbackPage() {
       </div>
 
       {/* ===== Form ===== */}
-      <Card className="p-6">
+      <FormWrapper embedded={embedded}>
         {/* noValidate: we show our own inline errors instead of the browser's popups. */}
         <form onSubmit={handleSubmit} className="space-y-4" noValidate>
           {/* Email (required). Error only shows after the user has interacted
@@ -339,7 +350,7 @@ export default function FeedbackPage() {
             {isSubmitting ? "Sending..." : "Send feedback"}
           </Button>
         </form>
-      </Card>
+      </FormWrapper>
 
       {/* ===== Response-time note ===== */}
       <p className="text-center text-xs text-muted-foreground">

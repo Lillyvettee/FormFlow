@@ -101,7 +101,10 @@ function AuthenticatedRouter() {
       <Route path="/people/:id" component={PersonPage} />
       <Route path="/team" component={TeamPage} />
       <Route path="/settings" component={SettingsPage} />
-      <Route path="/feedback" component={FeedbackPage} />
+      {/* Feedback lives in Settings now. */}
+      <Route path="/feedback">
+        <Redirect to="/settings#feedback" replace />
+      </Route>
       <Route path="/admin" component={AdminInboxPage} />
       <Route path="/scan">
         <ScanPage />
@@ -167,7 +170,9 @@ function UnauthenticatedRouter() {
     <Switch>
       <Route path="/forms/:id/submit" component={SubmitFormPage} />
       {/* The landing page footer links "Contact" here; the page supports signed-out visitors. */}
-      <Route path="/feedback" component={FeedbackPage} />
+      <Route path="/feedback">
+        <FeedbackPage />
+      </Route>
       {/* Printed QR codes (cards, labels) opened while signed out: sign in, then come back. */}
       <Route path="/scan/*">
         <Redirect to={`/login?${new URLSearchParams({ redirect: window.location.pathname })}`} replace />
