@@ -12,16 +12,20 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useOrganization } from "@/hooks/use-organization";
+import { useCardPrefix } from "@/hooks/use-card-prefix";
+import { CardDesignDialog } from "@/components/people/card-design-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
-import { Printer } from "lucide-react";
+import { Palette, Printer } from "lucide-react";
 import type { Person } from "@/types/database";
 
 const PROFILE = "__profile__";
 
 export function BulkCardsDialog({ people, onClose, onIssued }: { people: Person[]; onClose: () => void; onIssued: () => void }) {
-  const { canEdit } = useOrganization();
+  const { canEdit, isAdmin } = useOrganization();
   const { toast } = useToast();
+  const { prefix, design, saveDesign } = useCardPrefix();
+  const [designing, setDesigning] = useState(false);
   const [forms, setForms] = useState<{ id: string; title: string }[]>([]);
   const [formId, setFormId] = useState(PROFILE);
   const [isSaving, setIsSaving] = useState(false);
@@ -95,7 +99,12 @@ export function BulkCardsDialog({ people, onClose, onIssued }: { people: Person[
             </div>
           )}
 
-          <div className="flex justify-end gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
+            {isAdmin && (
+              <Button variant="outline" onClick={() => setDesigning(true)} className="mr-auto">
+                <Palette className="mr-1 h-4 w-4" aria-hidden="true" /> Edit card design
+              </Button>
+            )}
             <Button variant="outline" onClick={onClose}>
               Close
             </Button>
@@ -106,6 +115,15 @@ export function BulkCardsDialog({ people, onClose, onIssued }: { people: Person[
             </Button>
           </div>
         </div>
+        {designing && (
+          <CardDesignDialog
+            initial={design}
+            prefix={prefix}
+            samplePerson={people.find((p) => p.card_number != null) ?? null}
+            onSave={saveDesign}
+            onClose={() => setDesigning(false)}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

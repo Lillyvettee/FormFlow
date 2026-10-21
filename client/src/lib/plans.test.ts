@@ -57,8 +57,15 @@ describe("plan limits and features", () => {
   });
 
   it("leaves import, export, branding, advanced funder portals and scanning out of Starter only", () => {
-    const all = { importExport: true, branding: true, funderAdvanced: true, cardsScanning: true };
-    expect(PLANS.starter.features).toEqual({ importExport: false, branding: false, funderAdvanced: false, cardsScanning: false });
+    const all = { importExport: true, branding: true, funderAdvanced: true, cardsScanning: true, analytics: true, operations: true };
+    expect(PLANS.starter.features).toEqual({
+      importExport: false,
+      branding: false,
+      funderAdvanced: false,
+      cardsScanning: false,
+      analytics: false,
+      operations: false,
+    });
     expect(PLANS.mission.features).toEqual(all);
     expect(PLANS.enterprise.features).toEqual(all);
   });

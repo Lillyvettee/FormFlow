@@ -32,6 +32,10 @@ export interface PlanFeatures {
   funderAdvanced: boolean;
   /** ID cards for people, inventory barcodes and the Scan page. */
   cardsScanning: boolean;
+  /** The Analytics page: buying plan, demand, fundraising and volunteer trends. */
+  analytics: boolean;
+  /** Operations: Grant readiness (numbers, narratives, tracker, packets) and SOPs. */
+  operations: boolean;
 }
 
 export interface PlanInfo {
@@ -59,7 +63,7 @@ export const PLANS: Record<PlanId, PlanInfo> = {
     monthlyPrice: 49,
     yearlyPrice: 470,
     limits: { forms: 50, members: 2, people: 200, reports: 50 },
-    features: { importExport: false, branding: false, funderAdvanced: false, cardsScanning: false },
+    features: { importExport: false, branding: false, funderAdvanced: false, cardsScanning: false, analytics: false, operations: false },
     highlights: [
       "50 active forms",
       "2 team members",
@@ -75,7 +79,7 @@ export const PLANS: Record<PlanId, PlanInfo> = {
     monthlyPrice: 199,
     yearlyPrice: 1910,
     limits: { forms: 100, members: 10, people: 500, reports: 100 },
-    features: { importExport: true, branding: true, funderAdvanced: true, cardsScanning: true },
+    features: { importExport: true, branding: true, funderAdvanced: true, cardsScanning: true, analytics: true, operations: true },
     highlights: [
       "100 active forms",
       "10 team members",
@@ -86,6 +90,8 @@ export const PLANS: Record<PlanId, PlanInfo> = {
       "Custom branding",
       "Advanced funder portals",
       "ID cards and barcode scanning",
+      "Analytics and inventory buying plan",
+      "Grant readiness and SOPs",
     ],
   },
   enterprise: {
@@ -95,7 +101,7 @@ export const PLANS: Record<PlanId, PlanInfo> = {
     monthlyPrice: null,
     yearlyPrice: null,
     limits: { forms: null, members: null, people: null, reports: null },
-    features: { importExport: true, branding: true, funderAdvanced: true, cardsScanning: true },
+    features: { importExport: true, branding: true, funderAdvanced: true, cardsScanning: true, analytics: true, operations: true },
     highlights: [
       "Everything in Mission",
       "Unlimited forms",

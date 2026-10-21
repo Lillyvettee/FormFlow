@@ -84,6 +84,8 @@ import type { Form, FormField, FormSubmission, Person } from "@/types/database";
 const STATUS_LABELS: Record<Person["status"], string> = { active: "Active", completed: "Completed", inactive: "Inactive" };
 const STATUS_VARIANTS: Record<Person["status"], "default" | "secondary" | "outline"> = { active: "default", completed: "secondary", inactive: "outline" };
 const ALL = "__all__";
+/** Card scan action "open their profile" (no form). */
+const CARD_OPENS_PROFILE = "__profile__";
 
 /** True when the error means migration 010 hasn't been run yet. */
 const isMissingTable = (error: { code?: string } | null | undefined) => ["PGRST205", "42P01", "PGRST202"].includes(error?.code ?? "");
@@ -178,6 +180,23 @@ function PersonDialog({
   onSaved: (id: string) => void;
 }) {
   const { toast } = useToast();
+  const { plan } = useOrganization();
+  /** New people on Mission and Enterprise can get an ID card straight away (migration 022). */
+  const offerCard = person === "new" && plan.features.cardsScanning;
+  const [makeCard, setMakeCard] = useState(false);
+  const [cardFormId, setCardFormId] = useState(CARD_OPENS_PROFILE);
+  const [cardForms, setCardForms] = useState<{ id: string; title: string }[]>([]);
+  useEffect(() => {
+    if (!offerCard) return;
+    supabase
+      .from("forms")
+      .select("id, title")
+      .eq("is_published", true)
+      .eq("is_archived", false)
+      .eq("is_sample", false)
+      .order("title")
+      .then(({ data }) => setCardForms(data ?? []));
+  }, [offerCard]);
   const [draft, setDraft] = useState<Draft>(() => {
     if (person === "new") {
       return { full_name: "", first_name: "", last_name: "", email: "", phone: "", program: "", status: "active", start_date: toISODate(new Date()), notes: "" };
@@ -268,7 +287,19 @@ function PersonDialog({
       toast({ title: "Couldn't save", description: friendlyWriteError(res.error), variant: "destructive" });
       return;
     }
-    toast({ title: person === "new" ? "Person added" : "Changes saved" });
+    if (offerCard && makeCard) {
+      const { error: cardError } = await supabase.rpc("issue_person_cards", {
+        p_person_ids: [res.data.id],
+        p_form_id: cardFormId === CARD_OPENS_PROFILE ? null : cardFormId,
+      });
+      toast(
+        cardError
+          ? { title: "Person added, but the ID card wasn't made", description: cardError.message, variant: "destructive" }
+          : { title: "Person added with an ID card", description: "Print the card from their page." },
+      );
+    } else {
+      toast({ title: person === "new" ? "Person added" : "Changes saved" });
+    }
     onSaved(res.data.id);
     onClose();
   };
@@ -379,6 +410,34 @@ function PersonDialog({
             <p className="text-xs text-muted-foreground">
               {person === "new" ? "If this is a different person, choose Add anyway." : "If this is a different person, choose Save anyway."}
             </p>
+          </div>
+        )}
+        {offerCard && (
+          <div className="rounded-md border p-3 space-y-2">
+            <label className="flex items-center gap-2 text-sm font-medium">
+              <input type="checkbox" checked={makeCard} onChange={(e) => setMakeCard(e.target.checked)} className="h-4 w-4" />
+              Create an ID card
+            </label>
+            {makeCard && (
+              <div className="space-y-1">
+                <Label htmlFor="new-person-card-form" className="text-xs text-muted-foreground">
+                  When the card is scanned, open
+                </Label>
+                <Select value={cardFormId} onValueChange={setCardFormId}>
+                  <SelectTrigger id="new-person-card-form">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={CARD_OPENS_PROFILE}>Their profile</SelectItem>
+                    {cardForms.map((f) => (
+                      <SelectItem key={f.id} value={f.id}>
+                        Form: {f.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
         )}
         <DialogFooter>

@@ -9,6 +9,10 @@
  * puts them back (the database does both, and refuses to go below zero). The
  * item and quantity can't be changed on an existing entry: delete it and add
  * it again instead, so stock always matches.
+ *
+ * On Mission and Enterprise, the item can also be scanned (a printed label or
+ * the product's barcode, migration 022). Scanning the chosen item again adds
+ * one more.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -26,7 +30,9 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { friendlyWriteError } from "@/lib/db-errors";
 import { formatCurrency, formatDate, toISODate } from "@/lib/report-utils";
-import { HandHeart, Package, Pencil, Plus, Trash2 } from "lucide-react";
+import { HandHeart, Package, Pencil, Plus, ScanLine, Trash2 } from "lucide-react";
+import { BarcodeScanDialog } from "@/components/barcode-scan-dialog";
+import { parseScan } from "@/lib/cards";
 
 export interface Service {
   id: string;
@@ -70,6 +76,8 @@ function ServiceDialog({
   onSaved: () => void;
 }) {
   const { toast } = useToast();
+  const { plan } = useOrganization();
+  const [scanning, setScanning] = useState(false);
   const isNew = service === "new";
   const [date, setDate] = useState(isNew ? toISODate(new Date()) : service.date);
   const [type, setType] = useState(isNew ? "" : service.service_type);
@@ -82,6 +90,38 @@ function ServiceDialog({
 
   const item = items.find((i) => i.id === itemId);
   const qty = Number(quantity);
+
+  /** A scanned label or product barcode picks the item; the same item again adds one. */
+  const applyScannedItem = async (code: string) => {
+    setScanning(false);
+    const scan = parseScan(code);
+    if (!scan || scan.kind === "person") {
+      toast({ title: "That's not an inventory item", description: "Scan an item's label or product barcode.", variant: "destructive" });
+      return;
+    }
+    let id: string | null = scan.kind === "item" ? scan.id : null;
+    if (scan.kind === "barcode") {
+      const { data } = await supabase.from("inventory_items").select("id").eq("barcode", scan.code).maybeSingle();
+      id = data?.id ?? null;
+    }
+    const found = id ? items.find((i) => i.id === id) : undefined;
+    if (!found) {
+      toast({
+        title: "Item not found",
+        description: scan.kind === "barcode" ? `No item has the barcode ${scan.code}. Add it to the item in Inventory first.` : "That label isn't for an item in your inventory.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const next = found.id === itemId && Number.isInteger(qty) && qty >= 1 ? qty + 1 : 1;
+    if (next > found.quantity) {
+      toast({ title: `Only ${found.quantity} ${found.unit ?? ""} ${found.name} in stock`.replace(/\s+/g, " "), variant: "destructive" });
+      return;
+    }
+    setItemId(found.id);
+    setQuantity(String(next));
+    toast({ title: `${found.name}: ${next}` });
+  };
   const amount = value.trim() ? Number(value.replace(/[$,]/g, "")) : null;
   const errors = {
     type: type.trim() ? null : "Choose or type what was given.",
@@ -155,20 +195,31 @@ function ServiceDialog({
                   <Label htmlFor="service-item" className="flex items-center gap-1.5">
                     <Package className="h-3.5 w-3.5" aria-hidden="true" /> Take from inventory (optional)
                   </Label>
-                  <Select value={itemId} onValueChange={setItemId}>
-                    <SelectTrigger id="service-item">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NO_ITEM}>Nothing from inventory</SelectItem>
-                      {items.map((i) => (
-                        <SelectItem key={i.id} value={i.id} disabled={i.quantity < 1}>
-                          {i.name} ({i.quantity} {i.unit ?? "in stock"})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="flex gap-2">
+                    <Select value={itemId} onValueChange={setItemId}>
+                      <SelectTrigger id="service-item">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NO_ITEM}>Nothing from inventory</SelectItem>
+                        {items.map((i) => (
+                          <SelectItem key={i.id} value={i.id} disabled={i.quantity < 1}>
+                            {i.name} ({i.quantity} {i.unit ?? "in stock"})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {plan.features.cardsScanning && (
+                      <Button type="button" variant="outline" onClick={() => setScanning(true)} disabled={isSaving}>
+                        <ScanLine className="mr-1 h-4 w-4" aria-hidden="true" /> Scan
+                      </Button>
+                    )}
+                  </div>
+                  {plan.features.cardsScanning && (
+                    <p className="text-xs text-muted-foreground">Scan an item's label or barcode. Scan the same item again to add one more.</p>
+                  )}
                 </div>
+                {scanning && <BarcodeScanDialog onClose={() => setScanning(false)} onScanned={applyScannedItem} />}
                 {item && (
                   <div className="space-y-1.5">
                     <Label htmlFor="service-qty">How many</Label>

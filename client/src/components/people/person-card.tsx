@@ -19,7 +19,8 @@ import { useCardPrefix } from "@/hooks/use-card-prefix";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { formatCardNumber, personScanUrl } from "@/lib/cards";
-import { IdCard, Printer } from "lucide-react";
+import { IdCard, Palette, Printer } from "lucide-react";
+import { CardDesignDialog } from "@/components/people/card-design-dialog";
 import type { Form, Person } from "@/types/database";
 
 /** Select value for "no form: open their profile". */
@@ -28,7 +29,8 @@ const PROFILE = "__profile__";
 export function PersonIdCard({ person, forms, onChange }: { person: Person; forms: Form[]; onChange: () => void }) {
   const { plan, canEdit, isAdmin } = useOrganization();
   const { toast } = useToast();
-  const { prefix, save: savePrefix } = useCardPrefix();
+  const { prefix, design, save: savePrefix, saveDesign } = useCardPrefix();
+  const [designing, setDesigning] = useState(false);
   const [formId, setFormId] = useState(person.card_form_id ?? PROFILE);
   const [isSaving, setIsSaving] = useState(false);
   const [editingPrefix, setEditingPrefix] = useState(false);
@@ -167,6 +169,10 @@ export function PersonIdCard({ person, forms, onChange }: { person: Person; form
             </form>
           ) : (
             <span>
+              <button type="button" className="inline-flex items-center gap-1 underline hover:text-foreground" onClick={() => setDesigning(true)}>
+                <Palette className="h-3 w-3" aria-hidden="true" /> Edit card design
+              </button>
+              {" · "}
               Card numbers {prefix ? `start with "${prefix}-"` : "have no prefix"}.{" "}
               <button
                 type="button"
@@ -181,6 +187,16 @@ export function PersonIdCard({ person, forms, onChange }: { person: Person; form
             </span>
           )}
         </div>
+      )}
+
+      {designing && (
+        <CardDesignDialog
+          initial={design}
+          prefix={prefix}
+          samplePerson={hasCard ? person : null}
+          onSave={saveDesign}
+          onClose={() => setDesigning(false)}
+        />
       )}
     </Card>
   );

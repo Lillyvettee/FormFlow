@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, Link } from "wouter";
-import { LayoutDashboard, FileText, BarChart3, LinkIcon, Package, Settings, LogOut, Image, MessageSquare, DollarSign, Clock, Users, Inbox, ScanLine } from "lucide-react";
+import { LayoutDashboard, FileText, BarChart3, LinkIcon, Package, Settings, LogOut, Image, MessageSquare, DollarSign, Clock, Users, Inbox, ScanLine, TrendingUp, Award, BookOpen } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { useOrganization } from "@/hooks/use-organization";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -35,6 +35,12 @@ const phase2Items = [
   { title: "Volunteer Hours", url: "/volunteer-hours", icon: Clock },
   { title: "People", url: "/people", icon: Users },
   { title: "Scan", url: "/scan", icon: ScanLine },
+];
+
+const operationsItems = [
+  { title: "Analytics", url: "/analytics", icon: TrendingUp },
+  { title: "Grant readiness", url: "/grants", icon: Award },
+  { title: "SOPs", url: "/sops", icon: BookOpen },
 ];
 
 const bottomItems = [
@@ -121,6 +127,24 @@ export function AppSidebar() {
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild isActive={isActive(item.url)}>
                     <Link href={item.url} data-testid={`link-nav-${item.title.toLowerCase().replace(" ", "-")}`}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Operations</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {operationsItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton asChild isActive={isActive(item.url)}>
+                    <Link href={item.url} data-testid={`link-nav-${item.url.slice(1)}`}>
                       <item.icon className="h-4 w-4" />
                       <span>{item.title}</span>
                     </Link>

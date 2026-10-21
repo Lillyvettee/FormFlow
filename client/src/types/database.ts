@@ -178,6 +178,8 @@ export interface InventoryItem {
   updated_at: string
   /** Product barcode or our own label's code (migration 022). */
   barcode?: string | null
+  /** Stock level to keep, for the Analytics buying plan (migration 024). */
+  target_quantity?: number | null
 }
 
 export interface OrganizationSettings {

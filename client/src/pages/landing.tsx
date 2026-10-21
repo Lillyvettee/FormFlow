@@ -6,7 +6,8 @@
  * Sections, top to bottom:
  *   1. Header       logo, section links, theme toggle, sign in / get started
  *   2. Hero         headline, calls to action, trust points, dashboard mockup
- *   3. Features     grid of twelve product areas         (#features)
+ *   3. Features     grid of sixteen product areas        (#features);
+ *                   Mission-plan features carry a small tag
  *   4. Reports      report types and what they include  (#reports)
  *   5. Forms        special field types and sequences    (#forms)
  *   6. Pricing      Starter, Mission and Enterprise      (#pricing)
@@ -53,6 +54,10 @@ import {
   Target,
   Share2,
   UserPlus,
+  IdCard,
+  LineChart,
+  Award,
+  BookOpen,
   type LucideIcon,
 } from "lucide-react";
 
@@ -74,7 +79,10 @@ const APP_NAME = "HumMotion";
  * a dark-mode variant so icons stay readable on dark backgrounds (the
  * original -600 colors were low contrast in dark mode).
  */
-const FEATURES: { icon: LucideIcon; title: string; desc: string; color: string }[] = [
+/** Tag on features that need the Mission or Enterprise plan, so visitors aren't surprised later. */
+const MISSION_TAG = "Mission & Enterprise";
+
+const FEATURES: { icon: LucideIcon; title: string; desc: string; color: string; tag?: string }[] = [
   {
     icon: FileText,
     title: "Smart Form Builder",
@@ -132,8 +140,36 @@ const FEATURES: { icon: LucideIcon; title: string; desc: string; color: string }
   {
     icon: Share2,
     title: "Funder Report Links",
-    desc: "Share a live, read-only report with a funder or board member. No account needed on their side, and you can turn the link off anytime.",
+    desc: "Share a live, read-only report with a funder or board member. No account needed on their side. Choose what's counted, add notes, a password or an expiry date, and turn it off anytime.",
     color: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400",
+  },
+  {
+    icon: IdCard,
+    title: "ID Cards & Scanning",
+    desc: "Print ID cards in your own design and scan them with a phone to open someone's check-in form. Scan barcodes to receive and give out stock in seconds.",
+    color: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+    tag: MISSION_TAG,
+  },
+  {
+    icon: LineChart,
+    title: "Analytics & Buying Plan",
+    desc: "See how fast each item is used, when it will run out and how much to buy. Spot your busiest days, short-staffed shifts and how fundraising compares with last year.",
+    color: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+    tag: MISSION_TAG,
+  },
+  {
+    icon: Award,
+    title: "Grant Readiness",
+    desc: "Impact numbers for any period with ready-to-paste sentences, a library of reusable grant answers, a deadline tracker and one-click grant packets.",
+    color: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    tag: MISSION_TAG,
+  },
+  {
+    icon: BookOpen,
+    title: "SOPs",
+    desc: "Write your standard operating procedures step by step, so every volunteer does things the same way. Every change keeps the previous version.",
+    color: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+    tag: MISSION_TAG,
   },
   {
     icon: UserPlus,
@@ -491,6 +527,9 @@ export default function LandingPage() {
                         <Icon className="h-5 w-5" aria-hidden="true" />
                       </div>
                       <h3 className="font-semibold">{feature.title}</h3>
+                      {feature.tag && (
+                        <span className="inline-block rounded-full border px-2 py-0.5 text-[11px] font-medium text-muted-foreground">{feature.tag}</span>
+                      )}
                       <p className="text-sm text-muted-foreground leading-relaxed">{feature.desc}</p>
                     </Card>
                   </li>

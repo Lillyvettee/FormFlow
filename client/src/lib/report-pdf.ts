@@ -97,8 +97,8 @@ export async function openPrintableReport(opts: {
   logoUrl: string | null;
   brandColor: string | null;
   highlights: string[];
-  /** HTML built with the pdf* helpers above. */
-  body: string;
+  /** HTML built with the pdf* helpers above, or a function that builds it after beforeWrite. */
+  body: string | (() => string);
   /** Element containing the on-screen charts to copy (data-report-chart). */
   chartsRoot?: HTMLElement | null;
   beforeWrite?: () => Promise<unknown>;
@@ -117,6 +117,7 @@ export async function openPrintableReport(opts: {
     }
     w.document.open();
   }
+  const body = typeof opts.body === "function" ? opts.body() : opts.body;
 
   const brand = opts.brandColor && HEX.test(opts.brandColor) ? opts.brandColor : DEFAULT_BRAND;
   const logo = opts.logoUrl && /^https:\/\//.test(opts.logoUrl) ? opts.logoUrl : null;
@@ -181,7 +182,7 @@ export async function openPrintableReport(opts: {
         ? `<section class="highlights"><h2>Highlights</h2>${opts.highlights.map((p) => `<p>${h(p)}</p>`).join("")}</section>`
         : ""
     }
-    ${opts.body}
+    ${body}
     ${chartsFrom(opts.chartsRoot ?? null)}
     <div class="footer">${h(opts.orgName)} · Prepared with HumMotion on ${h(generated)}</div>
   </body></html>`);

@@ -5,9 +5,9 @@
  *
  *   /print/cards?ids=<id>,<id>   ID cards for those people
  *   /print/cards?all=1           every person with a card
- *     ID-badge size (3.375 x 2.125 in, CR80), 10 per US Letter page with
- *     cut lines. Organization name and logo, the person's name, card number
- *     and a QR code linking to /scan/person/<id>.
+ *     ID-badge size (CR80), in the organization's card design (migration
+ *     023; components/id-card-face): 10 landscape or 9 portrait cards per
+ *     US Letter page, with cut lines. QR codes link to /scan/person/<id>.
  *
  *   /print/labels?ids=<id>,...   inventory labels for those items
  *   /print/labels?all=1          every item
@@ -21,13 +21,15 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AppLogo } from "@/components/app-logo";
 import { QrCode } from "@/components/qr-code";
+import { IdCardFace } from "@/components/id-card-face";
+import { useTrackerFields } from "@/lib/tracker-fields";
+import { cardSize, cardsPerRow } from "@/lib/card-design";
 import { useOrganization } from "@/hooks/use-organization";
 import { useCardPrefix } from "@/hooks/use-card-prefix";
 import { supabase } from "@/lib/supabase";
 import { fetchAll } from "@/lib/report-utils";
-import { formatCardNumber, itemScanUrl, personScanUrl } from "@/lib/cards";
+import { itemScanUrl } from "@/lib/cards";
 import { Printer } from "lucide-react";
 import type { InventoryItem, Person } from "@/types/database";
 
@@ -96,7 +98,8 @@ function Sheet({
 
 export function PrintCardsPage() {
   const { organization, branding, plan, isLoading: orgLoading } = useOrganization();
-  const { prefix, isLoading: prefixLoading } = useCardPrefix();
+  const { prefix, design, isLoading: settingsLoading } = useCardPrefix();
+  const peopleFields = useTrackerFields("people");
   const [people, setPeople] = useState<Person[]>([]);
   const [state, setState] = useState<"loading" | "ready" | "error" | "locked">("loading");
 
@@ -119,38 +122,29 @@ export function PrintCardsPage() {
       .catch(() => setState("error"));
   }, [orgLoading, plan.features.cardsScanning]);
 
+  const { w } = cardSize(design.orientation);
+  const perPage = design.orientation === "landscape" ? 10 : 9;
+
   return (
     <Sheet
       title="ID cards"
-      hint="Prints 10 cards per Letter page with cut lines. Use 100% scale (Actual size). Card stock works best."
+      hint={`Prints ${perPage} cards per Letter page with cut lines. Use 100% scale (Actual size). Card stock works best.`}
       pageCss="size: letter; margin: 0.4in 0.5in;"
-      state={prefixLoading && state === "ready" ? "loading" : state}
+      state={settingsLoading && state === "ready" ? "loading" : state}
       count={people.length}
     >
-      <div className="p-6 print:p-0 grid gap-0 justify-start" style={{ gridTemplateColumns: "repeat(2, 3.375in)" }}>
+      <div className="p-6 print:p-0 grid gap-0 justify-start" style={{ gridTemplateColumns: `repeat(${cardsPerRow(design.orientation)}, ${w}in)` }}>
         {people.map((p) => (
-          <div
+          <IdCardFace
             key={p.id}
-            className="flex flex-col justify-between border border-dashed border-neutral-400 p-[0.14in] break-inside-avoid"
-            style={{ width: "3.375in", height: "2.125in" }}
-          >
-            <div className="flex items-center gap-2 min-w-0">
-              {branding.logoUrl ? (
-                <img src={branding.logoUrl} alt="" className="h-6 max-w-[0.9in] object-contain" />
-              ) : (
-                <AppLogo className="h-5 w-5" />
-              )}
-              <span className="truncate text-[9pt] font-semibold">{organization?.name}</span>
-            </div>
-            <div className="flex items-end justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-[13pt] font-bold leading-tight break-words">{p.full_name}</p>
-                <p className="mt-1 font-mono text-[11pt] tracking-wide">{formatCardNumber(prefix, p.card_number!)}</p>
-                <p className="mt-1 text-[6.5pt] text-neutral-600">Show this card when you visit.</p>
-              </div>
-              <QrCode value={personScanUrl(p.id)} size="1.05in" label={`QR code for ${p.full_name}`} />
-            </div>
-          </div>
+            design={design}
+            person={p}
+            prefix={prefix}
+            orgName={organization?.name ?? ""}
+            logoUrl={branding.logoUrl}
+            customFields={peopleFields.custom}
+            dashedEdge
+          />
         ))}
       </div>
     </Sheet>

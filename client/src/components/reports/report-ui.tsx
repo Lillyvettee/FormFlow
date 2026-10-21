@@ -21,6 +21,7 @@ import {
   PieChart,
   ResponsiveContainer,
   Tooltip,
+  Legend,
   XAxis,
   YAxis,
 } from "recharts";
@@ -221,6 +222,62 @@ export function TimeSeriesChart({
             {yAxis}
             {tooltip}
             <Line type="monotone" dataKey="value" name={seriesName} stroke={color} strokeWidth={2} dot={data.length < 40} />
+          </LineChart>
+        )}
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+/**
+ * Two series on one axis (e.g. this year vs last year), as grouped bars or
+ * lines, with a legend. Both series must use the same unit; charts of
+ * different measures belong side by side, never on a second axis.
+ * The colors are COLORS[0] and COLORS[1], checked for colorblind separation.
+ */
+export function TwoSeriesChart({
+  data,
+  kind,
+  names,
+  valueFormatter = (v) => v.toLocaleString("en-US"),
+  yTickFormatter,
+  heightClass = "h-56",
+}: {
+  /** null = no value yet (e.g. a month still to come), drawn as a gap. */
+  data: { label: string; a: number | null; b: number | null }[];
+  kind: "bar" | "line";
+  /** Legend and tooltip names for a and b. */
+  names: [string, string];
+  valueFormatter?: (v: number) => string;
+  yTickFormatter?: (v: number) => string;
+  heightClass?: string;
+}) {
+  if (!data.length || data.every((d) => !d.a && !d.b)) return <EmptyChart />;
+  const total = (k: "a" | "b") => data.reduce((s, d) => s + (d[k] ?? 0), 0);
+  const summary = `${names[0]}: total ${valueFormatter(total("a"))}. ${names[1]}: total ${valueFormatter(total("b"))}. From ${data[0].label} to ${data[data.length - 1].label}.`;
+  const common = (
+    <>
+      <CartesianGrid strokeDasharray="3 3" stroke="hsl(220, 13%, 80%)" strokeOpacity={0.5} vertical={false} />
+      <XAxis dataKey="label" tick={AXIS_TICK} minTickGap={8} />
+      <YAxis tick={AXIS_TICK} tickFormatter={yTickFormatter} width={64} />
+      <Tooltip contentStyle={TOOLTIP_STYLE} formatter={(v, name) => [valueFormatter(Number(v)), String(name)]} />
+      <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }} />
+    </>
+  );
+  return (
+    <div className={heightClass} role="img" aria-label={summary}>
+      <ResponsiveContainer width="100%" height="100%">
+        {kind === "bar" ? (
+          <BarChart data={data} barGap={2}>
+            {common}
+            <Bar dataKey="a" name={names[0]} fill={COLORS[0]} radius={[4, 4, 0, 0]} />
+            <Bar dataKey="b" name={names[1]} fill={COLORS[1]} radius={[4, 4, 0, 0]} />
+          </BarChart>
+        ) : (
+          <LineChart data={data}>
+            {common}
+            <Line type="monotone" dataKey="a" name={names[0]} stroke={COLORS[0]} strokeWidth={2} dot={{ r: 4 }} />
+            <Line type="monotone" dataKey="b" name={names[1]} stroke={COLORS[1]} strokeWidth={2} dot={{ r: 4 }} strokeDasharray="5 4" />
           </LineChart>
         )}
       </ResponsiveContainer>

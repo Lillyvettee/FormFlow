@@ -234,6 +234,7 @@ export default function InventoryPage() {
   const [location, setLocation] = useState("");
   const [notes, setNotes] = useState("");
   const [barcode, setBarcode] = useState("");
+  const [targetText, setTargetText] = useState("");
   /** Camera window for filling in the Barcode field. */
   const [scanningBarcode, setScanningBarcode] = useState(false);
   /** Values for the organization's own fields, keyed by field id. */
@@ -310,6 +311,7 @@ export default function InventoryPage() {
     setLocation("");
     setNotes("");
     setBarcode("");
+    setTargetText("");
     setCustomValues({});
     setCustomErrors({});
     setEditingItem(null);
@@ -335,6 +337,7 @@ export default function InventoryPage() {
     setLocation(item.location ?? "");
     setNotes(item.notes ?? "");
     setBarcode(item.barcode ?? "");
+    setTargetText(item.target_quantity != null ? String(item.target_quantity) : "");
     setCustomValues({ ...customOf(item as ItemWithThreshold) });
     setCustomErrors({});
     setShowDialog(true);
@@ -403,6 +406,7 @@ export default function InventoryPage() {
       if (fields.isAvailable) payload.custom = prepared.values;
       // Only sent on plans with scanning, so other plans can still edit items that have one.
       if (canScan) payload.barcode = barcode.trim() || null;
+      if (plan.features.analytics) payload.target_quantity = targetText.trim() === "" ? null : Math.max(0, Math.floor(Number(targetText)));
 
       const { error } = editingItem
         ? await supabase.from("inventory_items").update(payload).eq("id", editingItem.id)
@@ -1256,6 +1260,27 @@ export default function InventoryPage() {
                     <option key={l} value={l} />
                   ))}
                 </datalist>
+              </div>
+            )}
+
+            {/* Target level for the Analytics buying plan (migration 024). */}
+            {plan.features.analytics && (
+              <div className="space-y-2">
+                <Label htmlFor="item-target">
+                  Target stock level <span className="text-muted-foreground font-normal">(optional)</span>
+                </Label>
+                <Input
+                  id="item-target"
+                  type="number"
+                  min={0}
+                  value={targetText}
+                  onChange={(e) => setTargetText(e.target.value)}
+                  className="w-40"
+                  aria-describedby="item-target-help"
+                />
+                <p id="item-target-help" className="text-xs text-muted-foreground">
+                  How many you like to keep on hand. Analytics suggests buying up to this. Leave empty to plan by weeks of use instead.
+                </p>
               </div>
             )}
 

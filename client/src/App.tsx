@@ -73,6 +73,9 @@ import RefundsPage from "@/pages/refunds";
 import EnterprisePage from "@/pages/enterprise";
 import AdminInboxPage from "@/pages/admin-inbox";
 import ScanPage from "@/pages/scan";
+import AnalyticsPage from "@/pages/analytics";
+import GrantReadinessPage from "@/pages/grant-readiness";
+import SopsPage from "@/pages/sops";
 import { PrintCardsPage, PrintLabelsPage } from "@/pages/print-sheets";
 
 // ===========================================================================
@@ -86,6 +89,9 @@ function AuthenticatedRouter() {
       <Route path="/" component={DashboardPage} />
       <Route path="/forms" component={FormsPage} />
       <Route path="/reports" component={ReportsPage} />
+      <Route path="/analytics" component={AnalyticsPage} />
+      <Route path="/grants" component={GrantReadinessPage} />
+      <Route path="/sops" component={SopsPage} />
       <Route path="/links" component={LinksPage} />
       <Route path="/inventory" component={InventoryPage} />
       <Route path="/media" component={MediaPage} />
